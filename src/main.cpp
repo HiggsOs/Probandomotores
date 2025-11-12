@@ -11,8 +11,9 @@ Motor motor3(19, 23, 27, 4, 25200);   // I1 e I2 invertidos
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
 // Constante Km: Relación entre número de encoder y longitud (mm)
-// Km = 2*PI * (radio_polea_mm) / pulsos_por_revolucion
-// Km = 2*PI * (1.8/2) / 25200 = 0.000224 mm/pulso
+// Diámetro de polea = 1.8 mm → Radio = 0.9 mm
+// Km = (2 × π × radio) / pulsos_por_revolución
+// Km = (2 × π × 0.9) / 25200 = 5.65 / 25200 = 0.000224 mm/pulso
 #define Km 0.000224  // mm por pulso del encoder
 
 // Altura de la plataforma (mm)
@@ -56,7 +57,7 @@ volatile float Li3 = 435.0;
 // Longitudes actuales de los cables (mm)
 volatile float L1 = 430.0;
 volatile float L2 = 440.0;
-volatile float L3 = 435.0;
+volatile float L3 = 415.0;
 
 // Longitudes deseadas calculadas por cinemática inversa (mm)
 float dL1 = 413.0;
@@ -146,42 +147,65 @@ void IRAM_ATTR encoderMotor3() {
 
 // ========== FUNCIONES DE CONTROL DE MOTORES ==========
 
+// Variables para detección de movimiento de encoders
+struct DeteccionEncoder {
+  unsigned long ultimoCheck;
+  long posicionAnterior;
+};
+
+DeteccionEncoder deteccion1 = {0, 0};
+DeteccionEncoder deteccion2 = {0, 0};
+DeteccionEncoder deteccion3 = {0, 0};
+
+// Variable global para señalizar fallo de encoder
+volatile bool encoderFallo = false;
+
 /**
  * @brief Mueve el motor hacia la longitud deseada con control proporcional y detección de encoder
  * @param motor Referencia al motor
  * @param longitudActual Longitud actual del cable (mm)
  * @param longitudDeseada Longitud deseada del cable (mm)
  * @param direccionPositiva Si true, aumentar longitud es dirección positiva (horario)
- * @param ultimaActualizacion Referencia al tiempo de última actualización del encoder
+ * @param deteccion Referencia a la estructura de detección del encoder
  * @param nombreMotor Nombre del motor para debug
  * @return true si está dentro de tolerancia, false si se está moviendo
  */
-bool moverHaciaLongitud(Motor &motor, float longitudActual, float longitudDeseada, bool direccionPositiva, unsigned long &ultimaActualizacion, const char* nombreMotor) {
+bool moverHaciaLongitud(Motor &motor, float longitudActual, float longitudDeseada, bool direccionPositiva, DeteccionEncoder &deteccion, const char* nombreMotor) {
+  // Si ya hubo un fallo, no mover
+  if (encoderFallo) {
+    motor.mover(0);
+    return true;
+  }
+  
   float error = longitudDeseada - longitudActual;
   
   // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo mientras el motor se mueve
-  static unsigned long ultimoCheckEncoder = 0;
-  static long posicionAnteriorCheck = 0;
-  
-  if (millis() - ultimoCheckEncoder > 200) {
+  if (millis() - deteccion.ultimoCheck > 300) {  // Verificar cada 300ms
     long posicionActual = motor.getPosicion();
     
     // Si el motor debería estar moviéndose pero el encoder no cambia
-    if (abs(error) > TOLERANCIA && posicionActual == posicionAnteriorCheck) {
-      Serial.print("⚠️ ");
-      Serial.print(nombreMotor);
-      Serial.println(" - Encoder no detecta movimiento. Deteniendo todos los motores.");
-      
-      // DETENER TODOS LOS MOTORES
-      motor1.mover(0);
-      motor2.mover(0);
-      motor3.mover(0);
-      
-      return true; // Forzar salida del bucle
+    if (abs(error) > TOLERANCIA) {
+      if (posicionActual == deteccion.posicionAnterior) {
+        // ¡ENCODER NO RESPONDE!
+        Serial.print("\n❌❌❌ FALLO CRÍTICO: ");
+        Serial.print(nombreMotor);
+        Serial.println(" - Encoder no detecta movimiento ❌❌❌");
+        Serial.println(">>> DETENIENDO TODOS LOS MOTORES INMEDIATAMENTE <<<\n");
+        
+        // Marcar fallo global
+        encoderFallo = true;
+        
+        // DETENER TODOS LOS MOTORES INMEDIATAMENTE
+        motor1.mover(0);
+        motor2.mover(0);
+        motor3.mover(0);
+        
+        return true; // Forzar salida del bucle
+      }
     }
     
-    posicionAnteriorCheck = posicionActual;
-    ultimoCheckEncoder = millis();
+    deteccion.posicionAnterior = posicionActual;
+    deteccion.ultimoCheck = millis();
   }
   
   // Si está dentro de la tolerancia, detener
@@ -465,14 +489,31 @@ void loop() {
             
             unsigned long ultimoReporte = 0;
             
-            while (!(motor1Listo && motor2Listo && motor3Listo) && millis() < timeout) {
+            // Resetear flag de fallo al inicio
+            encoderFallo = false;
+            
+            // Inicializar estructuras de detección
+            deteccion1.ultimoCheck = millis();
+            deteccion1.posicionAnterior = motor1.getPosicion();
+            deteccion2.ultimoCheck = millis();
+            deteccion2.posicionAnterior = motor2.getPosicion();
+            deteccion3.ultimoCheck = millis();
+            deteccion3.posicionAnterior = motor3.getPosicion();
+            
+            while (!(motor1Listo && motor2Listo && motor3Listo) && millis() < timeout && !encoderFallo) {
               // Actualizar longitudes
               actualizarLongitudesActuales();
               
               // Mover cada motor hacia su objetivo con detección de encoder
-              motor1Listo = moverHaciaLongitud(motor1, L1, dL1, false, ultimaActualizacion1, "Motor 1");
-              motor2Listo = moverHaciaLongitud(motor2, L2, dL2, true, ultimaActualizacion2, "Motor 2");
-              motor3Listo = moverHaciaLongitud(motor3, L3, dL3, false, ultimaActualizacion3, "Motor 3");
+              motor1Listo = moverHaciaLongitud(motor1, L1, dL1, false, deteccion1, "Motor 1");
+              motor2Listo = moverHaciaLongitud(motor2, L2, dL2, true, deteccion2, "Motor 2");
+              motor3Listo = moverHaciaLongitud(motor3, L3, dL3, false, deteccion3, "Motor 3");
+              
+              // Si hubo fallo de encoder, salir inmediatamente
+              if (encoderFallo) {
+                Serial.println("\n🛑 SISTEMA DETENIDO POR FALLO DE ENCODER 🛑\n");
+                break;
+              }
               
               // Reporte periódico cada 1 segundo
               if (millis() - ultimoReporte > 1000) {
@@ -504,12 +545,15 @@ void loop() {
               delay(10);
             }
             
-            // Detener todos los motores
+            // Detener todos los motores al finalizar
             motor1.mover(0);
             motor2.mover(0);
             motor3.mover(0);
             
-            if (motor1Listo && motor2Listo && motor3Listo) {
+            if (encoderFallo) {
+              Serial.println("\n❌ MOVIMIENTO ABORTADO POR FALLO DE ENCODER ❌");
+              Serial.println("Verifica las conexiones de los encoders antes de continuar.\n");
+            } else if (motor1Listo && motor2Listo && motor3Listo) {
               Serial.println("✓ Posición alcanzada\n");
             } else {
               Serial.println("⚠️ Timeout - Posición no alcanzada completamente\n");
