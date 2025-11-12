@@ -238,6 +238,12 @@ long Motor::getPosicion() {
   return posicion; 
 }
 
+// Resetear posición del encoder
+void Motor::resetPosicion() {
+  posicion = 0;
+  posicionAnterior = 0;
+}
+
 long Motor::getVelocidad() { 
   return velocidad; 
 }

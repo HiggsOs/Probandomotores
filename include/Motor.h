@@ -91,6 +91,12 @@ class Motor {
     long getPosicion();
     
     /**
+     * @brief Resetea la posición del encoder a 0
+     * Útil para recalibrar el sistema en cualquier momento
+     */
+    void resetPosicion();
+    
+    /**
      * @brief Obtiene la velocidad calculada
      * @return Velocidad en pulsos por intervalo de medición
      */

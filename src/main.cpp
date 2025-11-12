@@ -3,17 +3,22 @@
 
 // ========== CONFIGURACIÓN DE MOTORES ==========
 // Crear instancias de los 3 motores con los parámetros especificados
-// NOTA: Pines configurados para que pulsos+ = longitud aumenta (jalar cables)
-Motor motor1(18, 5, 25, 26, 25200);   // I1 e I2 revertidos
-Motor motor2(17, 16, 32, 33, 25200);  // I1 e I2 revertidos  
-Motor motor3(23, 19, 27, 4, 25200);   // I1 e I2 revertidos
+// CONVENCIÓN (del código que funciona):
+//   - mover(+1) = horario = SUELTA cable = longitud AUMENTA
+//   - mover(-1) = antihorario = JALA cable = longitud DISMINUYE
+Motor motor1(18, 5, 25, 26, 25200);   // Configuración del código que funciona
+Motor motor2(17, 16, 32, 33, 25200);  // Pines invertidos para que siga misma convención
+Motor motor3(23, 19, 27, 4, 25200);   // Configuración del código que funciona
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
-// Constante Km: Relación entre número de encoder y longitud (mm)
-// Diámetro de polea = 1.8 mm → Radio = 0.9 mm
-// Km = (2 × π × radio) / pulsos_por_revolución
-// Km = (2 × π × 0.9) / 25200 = 5.65 / 25200 = 0.000224 mm/pulso
-#define Km 0.000224  // mm por pulso del encoder
+// Radio de la polea (mm)
+#define RADIO_POLEA 0.9
+
+// Conversión: ΔL (mm) a grados de rotación
+// Longitud = ángulo × radio → ángulo = longitud / radio
+// En grados: grados = (ΔL / radio) × (180/π)
+// Simplificado: grados = ΔL × 63.66 (para radio = 0.9 mm)
+#define MM_A_GRADOS (180.0 / (PI * RADIO_POLEA))  // ≈ 63.66 grados/mm
 
 // Altura de la plataforma (mm)
 #define H 435.0
@@ -49,19 +54,22 @@ const float B3y = -130.9;
 const float B3z = 24.05;
 
 // Longitudes iniciales de los cables (mm)
-volatile float Li1 = 430.0;
-volatile float Li2 = 440.0;
-volatile float Li3 = 435.0;
+// IMPORTANTE: Estas deben calcularse con cinemática inversa en posición neutra (0°, 0°)
+// Li = calcularLongitudCable(Ai, Bi, H, 0, 0)
+// Calculadas automáticamente en setup()
+volatile float Li1 = 0.0;  // Se calculará en setup()
+volatile float Li2 = 0.0;  // Se calculará en setup()
+volatile float Li3 = 0.0;  // Se calculará en setup()
 
 // Longitudes actuales de los cables (mm)
-volatile float L1 = 430.0;
-volatile float L2 = 440.0;
-volatile float L3 = 415.0;
+volatile float L1 = 0.0;
+volatile float L2 = 0.0;
+volatile float L3 = 0.0;
 
 // Longitudes deseadas calculadas por cinemática inversa (mm)
-float dL1 = 413.0;
-float dL2 = 422.0;
-float dL3 = 425.0;
+float dL1 = 0.0;
+float dL2 = 0.0;
+float dL3 = 0.0;
 
 // Ángulos de orientación de la plataforma (radianes)
 float tx = 0.0;  // Rotación en X
@@ -104,27 +112,28 @@ float calcularLongitudCable(float Ax, float Ay, float Az, float Bx, float By, fl
 
 /**
  * @brief Actualiza las longitudes actuales basándose en los encoders
+ * Usa la conversión: grados de rotación → longitud de cable
  */
 void actualizarLongitudesActuales() {
-  // Convertir pulsos del encoder a longitud en mm
-  // CORREGIDO: Motor 1 y 3 ahora SUMAN los pulsos (pulsos+ = longitud+)
-  L1 = Li1 + Km * motor1.getPosicion();  // Cambiado de - a +
-  L2 = Li2 - Km * motor2.getPosicion();  // Cambiado de + a -
-  L3 = Li3 + Km * motor3.getPosicion();  // Cambiado de - a +
+  // Convertir posición del encoder (pulsos) a grados, luego a longitud
+  float grados1 = (motor1.getPosicion() * 360.0) / motor1.getPulsosPorRevolucion();
+  float grados2 = (motor2.getPosicion() * 360.0) / motor2.getPulsosPorRevolucion();
+  float grados3 = (motor3.getPosicion() * 360.0) / motor3.getPulsosPorRevolucion();
+  
+  // Convertir grados a longitud (mm)
+  // Longitud = (grados / MM_A_GRADOS)
+  // Positivo = suelta cable = longitud aumenta
+  // Negativo = jala cable = longitud disminuye
+  L1 = Li1 + (grados1 / MM_A_GRADOS);
+  L2 = Li2 + (grados2 / MM_A_GRADOS);
+  L3 = Li3 + (grados3 / MM_A_GRADOS);
 }
 
 /**
- * @brief Convierte longitud (mm) a pulsos del encoder
+ * @brief Convierte cambio de longitud (mm) a grados de rotación
  */
-long longitudAPulsos(float longitud_mm) {
-  return (long)(longitud_mm / Km);
-}
-
-/**
- * @brief Convierte pulsos del encoder a longitud (mm)
- */
-float pulsosALongitud(long pulsos) {
-  return pulsos * Km;
+float deltaL_a_grados(float deltaL_mm) {
+  return deltaL_mm * MM_A_GRADOS;
 }
 
 // ========== FUNCIONES DE INTERRUPCIÓN ==========
@@ -147,163 +156,89 @@ void IRAM_ATTR encoderMotor3() {
 
 // ========== FUNCIONES DE CONTROL DE MOTORES ==========
 
-// Variables para detección de movimiento de encoders
+/**
+ * @brief Gira un motor con detección de encoder (del código que funciona)
+ * @param motor Referencia al motor a girar
+ * @param grados Grados a girar (positivo=suelta cable, negativo=jala cable)
+ * @param ultimaActualizacion Referencia al tiempo de última actualización del encoder
+ * @param nombreMotor Nombre del motor para mensajes de debug
+ * @return true si el giro fue exitoso, false si se detectó falla del encoder
+ */
+bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaActualizacion, const char* nombreMotor) {
+  // Calcular pulsos necesarios
+  long pulsosObjetivo = (long)((grados / 360.0) * motor.getPulsosPorRevolucion());
+  
+  Serial.print(nombreMotor);
+  Serial.print(": Girando ");
+  Serial.print(grados, 2);
+  Serial.print(" grados (");
+  Serial.print(abs(pulsosObjetivo));
+  Serial.println(" pulsos)");
+  
+  long posicionInicial = motor.getPosicion();
+  int direccion = (pulsosObjetivo >= 0) ? 1 : -1;  // 1 para horario (suelta), -1 para antihorario (jala)
+  pulsosObjetivo = abs(pulsosObjetivo);
+  
+  // Resetear tiempo de última actualización
+  ultimaActualizacion = millis();
+  
+  // Comenzar movimiento
+  motor.mover(direccion);
+  
+  // Continuar hasta alcanzar el objetivo
+  while (abs(motor.getPosicion() - posicionInicial) < pulsosObjetivo) {
+    // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo
+    if (millis() - ultimaActualizacion > TIMEOUT_ENCODER) {
+      // ¡ENCODER NO DETECTADO! Detener inmediatamente
+      motor.mover(0);
+      Serial.print("❌ ERROR: ");
+      Serial.print(nombreMotor);
+      Serial.println(" - Encoder no detectado. Motor detenido.");
+      Serial.print("Última actualización hace: ");
+      Serial.print(millis() - ultimaActualizacion);
+      Serial.println(" ms");
+      return false;  // Indicar falla
+    }
+    
+    delay(1);  // Delay mínimo para no saturar
+  }
+  
+  // Detener motor al alcanzar el objetivo
+  motor.mover(0);
+  
+  long pulsosReales = abs(motor.getPosicion() - posicionInicial);
+  Serial.print("✓ ");
+  Serial.print(nombreMotor);
+  Serial.print(" completado - Objetivo: ");
+  Serial.print(pulsosObjetivo);
+  Serial.print(" pulsos, Real: ");
+  Serial.print(pulsosReales);
+  Serial.println(" pulsos");
+  
+  return true;  // Éxito
+}
+
+// Variables para detección de movimiento de encoders (OLD - ya no se usa)
 struct DeteccionEncoder {
   unsigned long ultimoCheck;
   long posicionAnterior;
+  float errorAnterior;
+  int checksConErrorCreciente;
 };
 
-DeteccionEncoder deteccion1 = {0, 0};
-DeteccionEncoder deteccion2 = {0, 0};
-DeteccionEncoder deteccion3 = {0, 0};
+DeteccionEncoder deteccion1 = {0, 0, 0.0, 0};
+DeteccionEncoder deteccion2 = {0, 0, 0.0, 0};
+DeteccionEncoder deteccion3 = {0, 0, 0.0, 0};
 
-// Variable global para señalizar fallo de encoder
+// Variable global para señalizar fallo de encoder (no se usa actualmente)
 volatile bool encoderFallo = false;
 
-/**
- * @brief Mueve el motor hacia la longitud deseada con control proporcional y detección de encoder
- * @param motor Referencia al motor
- * @param longitudActual Longitud actual del cable (mm)
- * @param longitudDeseada Longitud deseada del cable (mm)
- * @param direccionPositiva Si true, aumentar longitud es dirección positiva (horario)
- * @param deteccion Referencia a la estructura de detección del encoder
- * @param nombreMotor Nombre del motor para debug
- * @return true si está dentro de tolerancia, false si se está moviendo
- */
-bool moverHaciaLongitud(Motor &motor, float longitudActual, float longitudDeseada, bool direccionPositiva, DeteccionEncoder &deteccion, const char* nombreMotor) {
-  // Si ya hubo un fallo, no mover
-  if (encoderFallo) {
-    motor.mover(0);
-    return true;
-  }
-  
-  float error = longitudDeseada - longitudActual;
-  
-  // DEBUG: Mostrar estado cada 500ms
-  static unsigned long ultimoDebug = 0;
-  if (millis() - ultimoDebug > 500) {
-    Serial.print(nombreMotor);
-    Serial.print(" - Pulsos: ");
-    Serial.print(motor.getPosicion());
-    Serial.print(", L_actual: ");
-    Serial.print(longitudActual, 2);
-    Serial.print(", L_deseada: ");
-    Serial.print(longitudDeseada, 2);
-    Serial.print(", Error: ");
-    Serial.println(error, 2);
-    ultimoDebug = millis();
-  }
-  
-  // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo mientras el motor se mueve
-  if (millis() - deteccion.ultimoCheck > 300) {  // Verificar cada 300ms
-    long posicionActual = motor.getPosicion();
-    long cambioPulsos = posicionActual - deteccion.posicionAnterior;
-    
-    // Si el motor debería estar moviéndose pero el encoder no cambia
-    if (abs(error) > TOLERANCIA) {
-      if (posicionActual == deteccion.posicionAnterior) {
-        // ¡ENCODER NO RESPONDE!
-        Serial.print("\n❌❌❌ FALLO CRÍTICO: ");
-        Serial.print(nombreMotor);
-        Serial.println(" - Encoder no detecta movimiento ❌❌❌");
-        Serial.print("Posición encoder: ");
-        Serial.print(posicionActual);
-        Serial.println(" (no cambió en 300ms)");
-        Serial.println(">>> DETENIENDO TODOS LOS MOTORES INMEDIATAMENTE <<<\n");
-        
-        // Marcar fallo global
-        encoderFallo = true;
-        
-        // DETENER TODOS LOS MOTORES INMEDIATAMENTE
-        motor1.mover(0);
-        motor2.mover(0);
-        motor3.mover(0);
-        
-        return true; // Forzar salida del bucle
-      }
-      
-      // DIAGNÓSTICO: Detectar si el encoder cuenta en dirección opuesta
-      // Si necesitamos AUMENTAR longitud pero los pulsos DISMINUYEN (o viceversa)
-      if (direccionPositiva) {
-        // Motor donde aumentar pulsos debería aumentar longitud
-        if (error > 0 && cambioPulsos < 0) {
-          Serial.print("\n⚠️⚠️⚠️ DIAGNÓSTICO: ");
-          Serial.print(nombreMotor);
-          Serial.println(" ⚠️⚠️⚠️");
-          Serial.println("El encoder está contando en DIRECCIÓN OPUESTA");
-          Serial.print("Error: ");
-          Serial.print(error, 2);
-          Serial.print(" mm (necesita AUMENTAR longitud)");
-          Serial.print(", pero pulsos están DISMINUYENDO: ");
-          Serial.println(cambioPulsos);
-          Serial.println(">>> Los pines I1/I2 están INVERTIDOS <<<");
-          Serial.println(">>> O la lógica de direccionPositiva está incorrecta <<<\n");
-        } else if (error < 0 && cambioPulsos > 0) {
-          Serial.print("\n⚠️⚠️⚠️ DIAGNÓSTICO: ");
-          Serial.print(nombreMotor);
-          Serial.println(" ⚠️⚠️⚠️");
-          Serial.println("El encoder está contando en DIRECCIÓN OPUESTA");
-          Serial.print("Error: ");
-          Serial.print(error, 2);
-          Serial.print(" mm (necesita REDUCIR longitud)");
-          Serial.print(", pero pulsos están AUMENTANDO: ");
-          Serial.println(cambioPulsos);
-          Serial.println(">>> Los pines I1/I2 están INVERTIDOS <<<");
-          Serial.println(">>> O la lógica de direccionPositiva está incorrecta <<<\n");
-        }
-      } else {
-        // Motor donde aumentar pulsos debería disminuir longitud
-        if (error > 0 && cambioPulsos > 0) {
-          Serial.print("\n⚠️⚠️⚠️ DIAGNÓSTICO: ");
-          Serial.print(nombreMotor);
-          Serial.println(" ⚠️⚠️⚠️");
-          Serial.println("El encoder está contando en DIRECCIÓN OPUESTA");
-          Serial.print("Error: ");
-          Serial.print(error, 2);
-          Serial.print(" mm (necesita AUMENTAR longitud)");
-          Serial.print(", pero pulsos están AUMENTANDO: ");
-          Serial.println(cambioPulsos);
-          Serial.println(">>> Los pines I1/I2 están INVERTIDOS <<<");
-          Serial.println(">>> O la fórmula L = Li - Km*pulsos está incorrecta <<<\n");
-        } else if (error < 0 && cambioPulsos < 0) {
-          Serial.print("\n⚠️⚠️⚠️ DIAGNÓSTICO: ");
-          Serial.print(nombreMotor);
-          Serial.println(" ⚠️⚠️⚠️");
-          Serial.println("El encoder está contando en DIRECCIÓN OPUESTA");
-          Serial.print("Error: ");
-          Serial.print(error, 2);
-          Serial.print(" mm (necesita REDUCIR longitud)");
-          Serial.print(", pero pulsos están DISMINUYENDO: ");
-          Serial.println(cambioPulsos);
-          Serial.println(">>> Los pines I1/I2 están INVERTIDOS <<<");
-          Serial.println(">>> O la fórmula L = Li - Km*pulsos está incorrecta <<<\n");
-        }
-      }
-    }
-    
-    deteccion.posicionAnterior = posicionActual;
-    deteccion.ultimoCheck = millis();
-  }
-  
-  // Si está dentro de la tolerancia, detener
-  if (abs(error) < TOLERANCIA) {
-    motor.mover(0);
-    return true;
-  }
-  
-  // Determinar dirección
-  int direccion;
-  if (direccionPositiva) {
-    // Para motor donde aumentar pulsos aumenta longitud
-    direccion = (error > 0) ? 1 : -1;
-  } else {
-    // Para motor donde aumentar pulsos disminuye longitud
-    direccion = (error > 0) ? -1 : 1;
-  }
-  
-  motor.mover(direccion);
-  return false;
+/* FUNCIÓN ANTIGUA - Ya no se usa, reemplazada por girarGradosConDeteccion()
+ * Se deja comentada por si se necesita como referencia
+bool moverHaciaLongitud(...) {
+  ...código complicado con direccionPositiva...
 }
+*/
 
 // ========== SETUP Y LOOP ==========
 
@@ -338,6 +273,38 @@ void setup() {
   
   Serial.println("Sistema inicializado correctamente.\n");
   
+  // ========== CALIBRACIÓN AUTOMÁTICA ==========
+  Serial.println("========================================");
+  Serial.println("  CALIBRACIÓN DE LONGITUDES INICIALES");
+  Serial.println("========================================");
+  Serial.println("Calculando longitudes en posición neutra (0°, 0°)...\n");
+  
+  // Calcular longitudes iniciales usando cinemática inversa
+  Li1 = calcularLongitudCable(A1x, A1y, A1z, B1x, B1y, B1z, H, 0, 0);
+  Li2 = calcularLongitudCable(A2x, A2y, A2z, B2x, B2y, B2z, H, 0, 0);
+  Li3 = calcularLongitudCable(A3x, A3y, A3z, B3x, B3y, B3z, H, 0, 0);
+  
+  Serial.println("Longitudes iniciales calculadas:");
+  Serial.print("  Li1 = ");
+  Serial.print(Li1, 2);
+  Serial.println(" mm");
+  Serial.print("  Li2 = ");
+  Serial.print(Li2, 2);
+  Serial.println(" mm");
+  Serial.print("  Li3 = ");
+  Serial.print(Li3, 2);
+  Serial.println(" mm");
+  
+  // Inicializar longitudes actuales (encoders en 0 al inicio)
+  L1 = Li1;
+  L2 = Li2;
+  L3 = Li3;
+  
+  Serial.println("\n⚠️  IMPORTANTE: Asegúrate de que la plataforma");
+  Serial.println("    esté en posición neutra (horizontal) al encender");
+  Serial.println("    o usa el comando 'reset' para recalibrar.\n");
+  Serial.println("========================================\n");
+  
   // Instrucciones de uso
   Serial.println("========================================");
   Serial.println("COMANDOS DISPONIBLES:");
@@ -349,6 +316,7 @@ void setup() {
   Serial.println("• Diagnóstico:");
   Serial.println("    diag [tx] [ty] → Ver cálculo sin mover");
   Serial.println("    test           → Prueba encoders");
+  Serial.println("    reset          → Recalibrar posición actual");
   Serial.println("");
   Serial.println("• Ver estado:");
   Serial.println("    pos      → Posiciones y longitudes");
@@ -382,8 +350,39 @@ void loop() {
       Serial.print("\n> Comando: ");
       Serial.println(comando);
       
+      // Comando RESET para recalibrar posición
+      if (comando.equals("RESET")) {
+        Serial.println("\n========== RECALIBRANDO SISTEMA ==========");
+        Serial.println("Reseteando encoders a 0...");
+        
+        // Resetear posiciones de encoders a 0
+        motor1.resetPosicion();
+        motor2.resetPosicion();
+        motor3.resetPosicion();
+        
+        // Recalcular longitudes actuales (ahora serán iguales a Li)
+        actualizarLongitudesActuales();
+        
+        // Resetear ángulos a 0
+        tx = 0.0;
+        ty = 0.0;
+        
+        Serial.println("✓ Encoders reseteados");
+        Serial.println("✓ Posición actual definida como neutra (0°, 0°)");
+        Serial.println("\nLongitudes actuales:");
+        Serial.print("  L1 = ");
+        Serial.print(L1, 2);
+        Serial.println(" mm");
+        Serial.print("  L2 = ");
+        Serial.print(L2, 2);
+        Serial.println(" mm");
+        Serial.print("  L3 = ");
+        Serial.print(L3, 2);
+        Serial.println(" mm");
+        Serial.println("========================================\n");
+      }
       // Comando TEST para probar encoders
-      if (comando.equals("TEST")) {
+      else if (comando.equals("TEST")) {
         Serial.println("\n========== PRUEBA DE ENCODERS ==========");
         Serial.println("Cada motor girará 1 segundo en cada dirección");
         Serial.println("Observa si los pulsos cambian correctamente\n");
@@ -539,21 +538,25 @@ void loop() {
             Serial.println(" mm");
             
             Serial.println("\nCambios necesarios:");
+            float deltaL1 = dL1_test - L1_actual_calc;
+            float deltaL2 = dL2_test - L2_actual_calc;
+            float deltaL3 = dL3_test - L3_actual_calc;
+            
             Serial.print("  ΔL1: ");
-            Serial.print(dL1_test - L1_actual_calc, 2);
+            Serial.print(deltaL1, 2);
             Serial.print(" mm (");
-            Serial.print(longitudAPulsos(abs(dL1_test - L1_actual_calc)));
-            Serial.println(" pulsos)");
+            Serial.print(deltaL_a_grados(abs(deltaL1)), 2);
+            Serial.println(" grados)");
             Serial.print("  ΔL2: ");
-            Serial.print(dL2_test - L2_actual_calc, 2);
+            Serial.print(deltaL2, 2);
             Serial.print(" mm (");
-            Serial.print(longitudAPulsos(abs(dL2_test - L2_actual_calc)));
-            Serial.println(" pulsos)");
+            Serial.print(deltaL_a_grados(abs(deltaL2)), 2);
+            Serial.println(" grados)");
             Serial.print("  ΔL3: ");
-            Serial.print(dL3_test - L3_actual_calc, 2);
+            Serial.print(deltaL3, 2);
             Serial.print(" mm (");
-            Serial.print(longitudAPulsos(abs(dL3_test - L3_actual_calc)));
-            Serial.println(" pulsos)");
+            Serial.print(deltaL_a_grados(abs(deltaL3)), 2);
+            Serial.println(" grados)");
             
             Serial.println("\nEstado actual de encoders:");
             Serial.print("  Motor 1: ");
@@ -566,13 +569,16 @@ void loop() {
             Serial.print(motor3.getPosicion());
             Serial.println(" pulsos");
             
-            Serial.println("\nValor de Km: ");
-            Serial.print("  ");
-            Serial.print(Km, 6);
-            Serial.println(" mm/pulso");
+            Serial.println("\nConversión:");
+            Serial.print("  Radio polea: ");
+            Serial.print(RADIO_POLEA, 1);
+            Serial.println(" mm");
             Serial.print("  1 mm = ");
-            Serial.print(1.0/Km, 0);
-            Serial.println(" pulsos");
+            Serial.print(MM_A_GRADOS, 2);
+            Serial.println(" grados");
+            Serial.print("  1 grado = ");
+            Serial.print(1.0/MM_A_GRADOS, 4);
+            Serial.println(" mm");
             
             Serial.println("==============================================\n");
           } else {
@@ -651,95 +657,81 @@ void loop() {
             
             Serial.println("\n--- MOVIENDO A POSICIÓN DESEADA ---");
             
-            // Mostrar info de depuración inicial
-            Serial.println("\nInfo de encoders:");
-            Serial.print("Motor 1 posición: ");
-            Serial.print(motor1.getPosicion());
-            Serial.println(" pulsos");
-            Serial.print("Motor 2 posición: ");
-            Serial.print(motor2.getPosicion());
-            Serial.println(" pulsos");
-            Serial.print("Motor 3 posición: ");
-            Serial.print(motor3.getPosicion());
-            Serial.println(" pulsos");
+            // Calcular cambios de longitud necesarios (ΔL)
+            float deltaL1 = dL1 - L1;
+            float deltaL2 = dL2 - L2;
+            float deltaL3 = dL3 - L3;
             
-            // Control en bucle hasta alcanzar posiciones
-            unsigned long timeout = millis() + 30000; // 30 segundos timeout
-            bool motor1Listo = false;
-            bool motor2Listo = false;
-            bool motor3Listo = false;
+            Serial.println("\nCambios necesarios:");
+            Serial.print("  ΔL1: ");
+            Serial.print(deltaL1, 2);
+            Serial.print(" mm → ");
+            Serial.print(deltaL_a_grados(deltaL1), 2);
+            Serial.println(" grados");
+            Serial.print("  ΔL2: ");
+            Serial.print(deltaL2, 2);
+            Serial.print(" mm → ");
+            Serial.print(deltaL_a_grados(deltaL2), 2);
+            Serial.println(" grados");
+            Serial.print("  ΔL3: ");
+            Serial.print(deltaL3, 2);
+            Serial.print(" mm → ");
+            Serial.print(deltaL_a_grados(deltaL3), 2);
+            Serial.println(" grados");
             
-            unsigned long ultimoReporte = 0;
+            // Convertir ΔL a grados de rotación
+            float grados1 = deltaL_a_grados(deltaL1);
+            float grados2 = deltaL_a_grados(deltaL2);
+            float grados3 = deltaL_a_grados(deltaL3);
             
-            // Resetear flag de fallo al inicio
-            encoderFallo = false;
+            Serial.println("\n--- Ejecutando movimientos ---");
             
-            // Inicializar estructuras de detección
-            deteccion1.ultimoCheck = millis();
-            deteccion1.posicionAnterior = motor1.getPosicion();
-            deteccion2.ultimoCheck = millis();
-            deteccion2.posicionAnterior = motor2.getPosicion();
-            deteccion3.ultimoCheck = millis();
-            deteccion3.posicionAnterior = motor3.getPosicion();
+            // Mover cada motor usando la función que funciona
+            bool exito = true;
             
-            while (!(motor1Listo && motor2Listo && motor3Listo) && millis() < timeout && !encoderFallo) {
-              // Actualizar longitudes
-              actualizarLongitudesActuales();
-              
-              // Mover cada motor hacia su objetivo con detección de encoder
-              // CORREGIDO: direccionPositiva invertida para todos los motores
-              motor1Listo = moverHaciaLongitud(motor1, L1, dL1, true, deteccion1, "Motor 1");   // Cambiado de false a true
-              motor2Listo = moverHaciaLongitud(motor2, L2, dL2, false, deteccion2, "Motor 2");  // Cambiado de true a false
-              motor3Listo = moverHaciaLongitud(motor3, L3, dL3, true, deteccion3, "Motor 3");   // Cambiado de false a true
-              
-              // Si hubo fallo de encoder, salir inmediatamente
-              if (encoderFallo) {
-                Serial.println("\n🛑 SISTEMA DETENIDO POR FALLO DE ENCODER 🛑\n");
-                break;
+            // Motor 1
+            if (abs(grados1) > 0.1) {  // Solo mover si hay cambio significativo
+              if (!girarGradosConDeteccion(motor1, grados1, ultimaActualizacion1, "Motor 1")) {
+                exito = false;
+                Serial.println("❌ Fallo en Motor 1");
               }
-              
-              // Reporte periódico cada 1 segundo
-              if (millis() - ultimoReporte > 1000) {
-                Serial.println("\n-- Estado actual --");
-                Serial.print("M1: ");
-                Serial.print(motor1.getPosicion());
-                Serial.print(" pulsos, L=");
-                Serial.print(L1, 2);
-                Serial.print(" mm (obj: ");
-                Serial.print(dL1, 2);
-                Serial.println(" mm)");
-                Serial.print("M2: ");
-                Serial.print(motor2.getPosicion());
-                Serial.print(" pulsos, L=");
-                Serial.print(L2, 2);
-                Serial.print(" mm (obj: ");
-                Serial.print(dL2, 2);
-                Serial.println(" mm)");
-                Serial.print("M3: ");
-                Serial.print(motor3.getPosicion());
-                Serial.print(" pulsos, L=");
-                Serial.print(L3, 2);
-                Serial.print(" mm (obj: ");
-                Serial.print(dL3, 2);
-                Serial.println(" mm)");
-                ultimoReporte = millis();
-              }
-              
-              delay(10);
+            } else {
+              Serial.println("Motor 1: Sin cambio necesario");
             }
             
-            // Detener todos los motores al finalizar
-            motor1.mover(0);
-            motor2.mover(0);
-            motor3.mover(0);
+            delay(100);
             
-            if (encoderFallo) {
-              Serial.println("\n❌ MOVIMIENTO ABORTADO POR FALLO DE ENCODER ❌");
-              Serial.println("Verifica las conexiones de los encoders antes de continuar.\n");
-            } else if (motor1Listo && motor2Listo && motor3Listo) {
-              Serial.println("✓ Posición alcanzada\n");
+            // Motor 2
+            if (abs(grados2) > 0.1) {
+              if (!girarGradosConDeteccion(motor2, grados2, ultimaActualizacion2, "Motor 2")) {
+                exito = false;
+                Serial.println("❌ Fallo en Motor 2");
+              }
             } else {
-              Serial.println("⚠️ Timeout - Posición no alcanzada completamente\n");
+              Serial.println("Motor 2: Sin cambio necesario");
+            }
+            
+            delay(100);
+            
+            // Motor 3
+            if (abs(grados3) > 0.1) {
+              if (!girarGradosConDeteccion(motor3, grados3, ultimaActualizacion3, "Motor 3")) {
+                exito = false;
+                Serial.println("❌ Fallo en Motor 3");
+              }
+            } else {
+              Serial.println("Motor 3: Sin cambio necesario");
+            }
+            
+            // Actualizar longitudes finales
+            actualizarLongitudesActuales();
+            
+            // Mostrar resultado
+            Serial.println("\n========================================");
+            if (exito) {
+              Serial.println("✓ Movimiento completado exitosamente");
+            } else {
+              Serial.println("❌ Movimiento completado con errores");
             }
             
             Serial.println("Posiciones finales:");
