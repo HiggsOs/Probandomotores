@@ -3,11 +3,10 @@
 
 // ========== CONFIGURACIÓN DE MOTORES ==========
 // Crear instancias de los 3 motores con los parámetros especificados
-// NOTA: Pines I1 e I2 INVERTIDOS en todos los motores para corregir dirección
-// Horario = jalar cables, Antihorario = soltar cables
-Motor motor1(5, 18, 25, 26, 25200);  // I1 e I2 invertidos
-Motor motor2(16, 17, 32, 33, 25200);  // I1 e I2 invertidos
-Motor motor3(19, 23, 27, 4, 25200);   // I1 e I2 invertidos
+// NOTA: Pines configurados para que pulsos+ = longitud aumenta (jalar cables)
+Motor motor1(18, 5, 25, 26, 25200);   // I1 e I2 revertidos
+Motor motor2(17, 16, 32, 33, 25200);  // I1 e I2 revertidos  
+Motor motor3(23, 19, 27, 4, 25200);   // I1 e I2 revertidos
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
 // Constante Km: Relación entre número de encoder y longitud (mm)
