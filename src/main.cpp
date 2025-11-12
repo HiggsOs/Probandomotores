@@ -12,12 +12,12 @@ Motor motor3(23, 19, 27, 4, 25200);   // Configuración del código que funciona
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
 // Radio de la polea (mm)
-#define RADIO_POLEA 0.9
+#define RADIO_POLEA 8.75
 
 // Conversión: ΔL (mm) a grados de rotación
 // Longitud = ángulo × radio → ángulo = longitud / radio
 // En grados: grados = (ΔL / radio) × (180/π)
-// Simplificado: grados = ΔL × 63.66 (para radio = 0.9 mm)
+// Simplificado: grados = ΔL × 63.66 (para radio = 8.75 mm)
 #define MM_A_GRADOS (180.0 / (PI * RADIO_POLEA))  // ≈ 63.66 grados/mm
 
 // Altura de la plataforma (mm)
@@ -317,6 +317,7 @@ void setup() {
   Serial.println("    diag [tx] [ty] → Ver cálculo sin mover");
   Serial.println("    test           → Prueba encoders");
   Serial.println("    reset          → Recalibrar posición actual");
+  Serial.println("    cal / cal1/2/3 → Calibrar radio de polea");
   Serial.println("");
   Serial.println("• Ver estado:");
   Serial.println("    pos      → Posiciones y longitudes");
@@ -380,6 +381,134 @@ void loop() {
         Serial.print(L3, 2);
         Serial.println(" mm");
         Serial.println("========================================\n");
+      }
+      // Comando CAL para calibración empírica del radio
+      else if (comando.equals("CAL")) {
+        Serial.println("\n========== CALIBRACIÓN EMPÍRICA ==========");
+        Serial.println("Este comando te ayudará a medir la relación");
+        Serial.println("real entre pulsos del encoder y movimiento del cable.\n");
+        Serial.println("INSTRUCCIONES:");
+        Serial.println("1. Marca el cable con un marcador");
+        Serial.println("2. Mide la posición inicial");
+        Serial.println("3. El motor girará y se detendrá");
+        Serial.println("4. Mide cuántos mm se movió el cable");
+        Serial.println("5. Ingresa el valor medido\n");
+        Serial.println("¿Motor a calibrar? (1, 2 o 3)");
+        Serial.println("Escribe: cal1, cal2 o cal3\n");
+        Serial.println("========================================\n");
+      }
+      // Comandos CAL1, CAL2, CAL3 para calibración individual
+      else if (comando.equals("CAL1") || comando.equals("CAL2") || comando.equals("CAL3")) {
+        int numMotor = comando.charAt(3) - '0';
+        Motor* motorSel;
+        unsigned long* ultAct;
+        String nombreMotor;
+        
+        switch(numMotor) {
+          case 1: motorSel = &motor1; ultAct = &ultimaActualizacion1; nombreMotor = "Motor 1"; break;
+          case 2: motorSel = &motor2; ultAct = &ultimaActualizacion2; nombreMotor = "Motor 2"; break;
+          case 3: motorSel = &motor3; ultAct = &ultimaActualizacion3; nombreMotor = "Motor 3"; break;
+          default: Serial.println("❌ Motor no válido\n"); return;
+        }
+        
+        Serial.println("\n========== CALIBRACIÓN " + nombreMotor + " ==========");
+        Serial.println("Preparando prueba...\n");
+        
+        // Resetear posición
+        motorSel->resetPosicion();
+        
+        Serial.println("✓ Encoder reseteado a 0");
+        Serial.println("\n📏 Marca el cable con un marcador AHORA");
+        Serial.println("   Presiona ENTER cuando estés listo para girar...");
+        
+        // Esperar entrada del usuario
+        while (Serial.available() == 0) {
+          delay(100);
+        }
+        Serial.readString(); // Limpiar buffer
+        
+        // Girar 1 vuelta completa (360 grados)
+        Serial.println("\n⚙️  Girando 1 vuelta completa (360°)...");
+        bool exito = girarGradosConDeteccion(*motorSel, 360.0, *ultAct, nombreMotor.c_str());
+        
+        if (exito) {
+          long pulsosTotales = motorSel->getPosicion();
+          
+          Serial.println("\n✓ Movimiento completado");
+          Serial.print("   Pulsos registrados: ");
+          Serial.println(pulsosTotales);
+          Serial.println("\n📏 Mide cuántos MILÍMETROS se movió el cable");
+          Serial.println("   (usa una regla o cinta métrica)");
+          Serial.println("\n   Escribe el valor en mm y presiona ENTER:");
+          Serial.println("   Ejemplo: 5.5");
+          
+          // Esperar medición del usuario
+          while (Serial.available() == 0) {
+            delay(100);
+          }
+          
+          String medicionStr = Serial.readStringUntil('\n');
+          medicionStr.trim();
+          float mmReales = medicionStr.toFloat();
+          
+          if (mmReales > 0) {
+            Serial.println("\n========== RESULTADOS ==========");
+            Serial.print("Medición: ");
+            Serial.print(mmReales, 2);
+            Serial.println(" mm");
+            Serial.print("Pulsos: ");
+            Serial.println(pulsosTotales);
+            
+            // Calcular radio efectivo de la polea
+            // mmReales = 360° × (radio_efectivo/180°×π)
+            // radio_efectivo = mmReales × π / 360° × 180°
+            float circunferencia = mmReales; // 1 vuelta = circunferencia
+            float radioEfectivo = circunferencia / (2.0 * PI);
+            
+            Serial.print("\n📐 Radio efectivo de la polea: ");
+            Serial.print(radioEfectivo, 3);
+            Serial.println(" mm");
+            Serial.print("   Diámetro efectivo: ");
+            Serial.print(radioEfectivo * 2.0, 3);
+            Serial.println(" mm");
+            
+            // Calcular conversión mm/pulso
+            float mmPorPulso = mmReales / (float)pulsosTotales;
+            Serial.print("\n🔢 Conversión: ");
+            Serial.print(mmPorPulso, 6);
+            Serial.println(" mm/pulso");
+            Serial.print("   O: ");
+            Serial.print(1.0/mmPorPulso, 2);
+            Serial.println(" pulsos/mm");
+            
+            // Calcular nuevo MM_A_GRADOS
+            float nuevoMM_A_GRADOS = 360.0 / mmReales;
+            Serial.print("\n✨ Valor sugerido para MM_A_GRADOS: ");
+            Serial.print(nuevoMM_A_GRADOS, 2);
+            Serial.println(" grados/mm");
+            Serial.print("   (Valor actual: ");
+            Serial.print(MM_A_GRADOS, 2);
+            Serial.println(" grados/mm)");
+            
+            if (abs(nuevoMM_A_GRADOS - MM_A_GRADOS) > 5.0) {
+              Serial.println("\n⚠️  RECOMENDACIÓN: Actualizar el valor en el código");
+              Serial.println("   Cambia la línea:");
+              Serial.print("   #define RADIO_POLEA ");
+              Serial.println(RADIO_POLEA, 1);
+              Serial.println("   por:");
+              Serial.print("   #define RADIO_POLEA ");
+              Serial.println(radioEfectivo, 3);
+            } else {
+              Serial.println("\n✓ El radio actual es correcto");
+            }
+            
+            Serial.println("========================================\n");
+          } else {
+            Serial.println("❌ Valor inválido\n");
+          }
+        } else {
+          Serial.println("❌ Error en el movimiento\n");
+        }
       }
       // Comando TEST para probar encoders
       else if (comando.equals("TEST")) {
