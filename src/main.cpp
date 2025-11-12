@@ -3,9 +3,11 @@
 
 // ========== CONFIGURACIÓN DE MOTORES ==========
 // Crear instancias de los 3 motores con los parámetros especificados
-Motor motor1(18, 5, 25, 26, 25200);
-Motor motor2(17, 16, 32, 33, 25200);  // Pines I1 e I2 invertidos para corregir dirección
-Motor motor3(23, 19, 27, 4, 25200);
+// NOTA: Pines I1 e I2 INVERTIDOS en todos los motores para corregir dirección
+// Horario = jalar cables, Antihorario = soltar cables
+Motor motor1(5, 18, 25, 26, 25200);  // I1 e I2 invertidos
+Motor motor2(16, 17, 32, 33, 25200);  // I1 e I2 invertidos
+Motor motor3(19, 23, 27, 4, 25200);   // I1 e I2 invertidos
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
 // Constante Km: Relación entre número de encoder y longitud (mm)
@@ -47,14 +49,14 @@ const float B3y = -130.9;
 const float B3z = 24.05;
 
 // Longitudes iniciales de los cables (mm)
-volatile float Li1 = 413.0;
-volatile float Li2 = 422.0;
-volatile float Li3 = 425.0;
+volatile float Li1 = 430.0;
+volatile float Li2 = 440.0;
+volatile float Li3 = 435.0;
 
 // Longitudes actuales de los cables (mm)
-volatile float L1 = 413.0;
-volatile float L2 = 422.0;
-volatile float L3 = 425.0;
+volatile float L1 = 430.0;
+volatile float L2 = 440.0;
+volatile float L3 = 435.0;
 
 // Longitudes deseadas calculadas por cinemática inversa (mm)
 float dL1 = 413.0;
@@ -145,15 +147,42 @@ void IRAM_ATTR encoderMotor3() {
 // ========== FUNCIONES DE CONTROL DE MOTORES ==========
 
 /**
- * @brief Mueve el motor hacia la longitud deseada con control proporcional
+ * @brief Mueve el motor hacia la longitud deseada con control proporcional y detección de encoder
  * @param motor Referencia al motor
  * @param longitudActual Longitud actual del cable (mm)
  * @param longitudDeseada Longitud deseada del cable (mm)
  * @param direccionPositiva Si true, aumentar longitud es dirección positiva (horario)
+ * @param ultimaActualizacion Referencia al tiempo de última actualización del encoder
+ * @param nombreMotor Nombre del motor para debug
  * @return true si está dentro de tolerancia, false si se está moviendo
  */
-bool moverHaciaLongitud(Motor &motor, float longitudActual, float longitudDeseada, bool direccionPositiva) {
+bool moverHaciaLongitud(Motor &motor, float longitudActual, float longitudDeseada, bool direccionPositiva, unsigned long &ultimaActualizacion, const char* nombreMotor) {
   float error = longitudDeseada - longitudActual;
+  
+  // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo mientras el motor se mueve
+  static unsigned long ultimoCheckEncoder = 0;
+  static long posicionAnteriorCheck = 0;
+  
+  if (millis() - ultimoCheckEncoder > 200) {
+    long posicionActual = motor.getPosicion();
+    
+    // Si el motor debería estar moviéndose pero el encoder no cambia
+    if (abs(error) > TOLERANCIA && posicionActual == posicionAnteriorCheck) {
+      Serial.print("⚠️ ");
+      Serial.print(nombreMotor);
+      Serial.println(" - Encoder no detecta movimiento. Deteniendo todos los motores.");
+      
+      // DETENER TODOS LOS MOTORES
+      motor1.mover(0);
+      motor2.mover(0);
+      motor3.mover(0);
+      
+      return true; // Forzar salida del bucle
+    }
+    
+    posicionAnteriorCheck = posicionActual;
+    ultimoCheckEncoder = millis();
+  }
   
   // Si está dentro de la tolerancia, detener
   if (abs(error) < TOLERANCIA) {
@@ -216,6 +245,9 @@ void setup() {
   Serial.println("    ang [tx] [ty]  → Ángulos en grados");
   Serial.println("    Ejemplo: ang 5 -3");
   Serial.println("");
+  Serial.println("• Prueba de encoders:");
+  Serial.println("    test          → Prueba encoders (1 seg c/motor)");
+  Serial.println("");
   Serial.println("• Ver estado:");
   Serial.println("    pos      → Posiciones y longitudes");
   Serial.println("    ang      → Ángulos actuales");
@@ -248,8 +280,106 @@ void loop() {
       Serial.print("\n> Comando: ");
       Serial.println(comando);
       
+      // Comando TEST para probar encoders
+      if (comando.equals("TEST")) {
+        Serial.println("\n========== PRUEBA DE ENCODERS ==========");
+        Serial.println("Cada motor girará 1 segundo en cada dirección");
+        Serial.println("Observa si los pulsos cambian correctamente\n");
+        
+        // Probar Motor 1
+        Serial.println("--- Motor 1 ---");
+        long pos1Inicial = motor1.getPosicion();
+        Serial.print("Posición inicial: ");
+        Serial.println(pos1Inicial);
+        Serial.println("Girando horario 1 seg...");
+        motor1.mover(1);
+        delay(1000);
+        motor1.mover(0);
+        long pos1Horario = motor1.getPosicion();
+        Serial.print("Posición después: ");
+        Serial.print(pos1Horario);
+        Serial.print(" (cambio: ");
+        Serial.print(pos1Horario - pos1Inicial);
+        Serial.println(" pulsos)");
+        delay(500);
+        
+        Serial.println("Girando antihorario 1 seg...");
+        motor1.mover(-1);
+        delay(1000);
+        motor1.mover(0);
+        long pos1Final = motor1.getPosicion();
+        Serial.print("Posición final: ");
+        Serial.print(pos1Final);
+        Serial.print(" (cambio: ");
+        Serial.print(pos1Final - pos1Horario);
+        Serial.println(" pulsos)\n");
+        delay(1000);
+        
+        // Probar Motor 2
+        Serial.println("--- Motor 2 ---");
+        long pos2Inicial = motor2.getPosicion();
+        Serial.print("Posición inicial: ");
+        Serial.println(pos2Inicial);
+        Serial.println("Girando horario 1 seg...");
+        motor2.mover(1);
+        delay(1000);
+        motor2.mover(0);
+        long pos2Horario = motor2.getPosicion();
+        Serial.print("Posición después: ");
+        Serial.print(pos2Horario);
+        Serial.print(" (cambio: ");
+        Serial.print(pos2Horario - pos2Inicial);
+        Serial.println(" pulsos)");
+        delay(500);
+        
+        Serial.println("Girando antihorario 1 seg...");
+        motor2.mover(-1);
+        delay(1000);
+        motor2.mover(0);
+        long pos2Final = motor2.getPosicion();
+        Serial.print("Posición final: ");
+        Serial.print(pos2Final);
+        Serial.print(" (cambio: ");
+        Serial.print(pos2Final - pos2Horario);
+        Serial.println(" pulsos)\n");
+        delay(1000);
+        
+        // Probar Motor 3
+        Serial.println("--- Motor 3 ---");
+        long pos3Inicial = motor3.getPosicion();
+        Serial.print("Posición inicial: ");
+        Serial.println(pos3Inicial);
+        Serial.println("Girando horario 1 seg...");
+        motor3.mover(1);
+        delay(1000);
+        motor3.mover(0);
+        long pos3Horario = motor3.getPosicion();
+        Serial.print("Posición después: ");
+        Serial.print(pos3Horario);
+        Serial.print(" (cambio: ");
+        Serial.print(pos3Horario - pos3Inicial);
+        Serial.println(" pulsos)");
+        delay(500);
+        
+        Serial.println("Girando antihorario 1 seg...");
+        motor3.mover(-1);
+        delay(1000);
+        motor3.mover(0);
+        long pos3Final = motor3.getPosicion();
+        Serial.print("Posición final: ");
+        Serial.print(pos3Final);
+        Serial.print(" (cambio: ");
+        Serial.print(pos3Final - pos3Horario);
+        Serial.println(" pulsos)\n");
+        
+        Serial.println("========== FIN DE PRUEBA ==========");
+        Serial.println("ANÁLISIS:");
+        Serial.println("✓ Si los pulsos cambian: Encoder funciona");
+        Serial.println("✗ Si pulsos = 0: Verifica conexiones del encoder");
+        Serial.println("========================================\n");
+      }
       // Comando ANG para establecer ángulos
-      if (comando.startsWith("ANG")) {
+      else if (comando.startsWith("ANG")) {
         String parametros = comando.substring(3);
         parametros.trim();
         
@@ -315,20 +445,61 @@ void loop() {
             
             Serial.println("\n--- MOVIENDO A POSICIÓN DESEADA ---");
             
+            // Mostrar info de depuración inicial
+            Serial.println("\nInfo de encoders:");
+            Serial.print("Motor 1 posición: ");
+            Serial.print(motor1.getPosicion());
+            Serial.println(" pulsos");
+            Serial.print("Motor 2 posición: ");
+            Serial.print(motor2.getPosicion());
+            Serial.println(" pulsos");
+            Serial.print("Motor 3 posición: ");
+            Serial.print(motor3.getPosicion());
+            Serial.println(" pulsos");
+            
             // Control en bucle hasta alcanzar posiciones
             unsigned long timeout = millis() + 30000; // 30 segundos timeout
             bool motor1Listo = false;
             bool motor2Listo = false;
             bool motor3Listo = false;
             
+            unsigned long ultimoReporte = 0;
+            
             while (!(motor1Listo && motor2Listo && motor3Listo) && millis() < timeout) {
               // Actualizar longitudes
               actualizarLongitudesActuales();
               
-              // Mover cada motor hacia su objetivo
-              motor1Listo = moverHaciaLongitud(motor1, L1, dL1, false); // Motor 1: pulsos negativos = aumentar L
-              motor2Listo = moverHaciaLongitud(motor2, L2, dL2, true);  // Motor 2: pulsos positivos = aumentar L
-              motor3Listo = moverHaciaLongitud(motor3, L3, dL3, false); // Motor 3: pulsos negativos = aumentar L
+              // Mover cada motor hacia su objetivo con detección de encoder
+              motor1Listo = moverHaciaLongitud(motor1, L1, dL1, false, ultimaActualizacion1, "Motor 1");
+              motor2Listo = moverHaciaLongitud(motor2, L2, dL2, true, ultimaActualizacion2, "Motor 2");
+              motor3Listo = moverHaciaLongitud(motor3, L3, dL3, false, ultimaActualizacion3, "Motor 3");
+              
+              // Reporte periódico cada 1 segundo
+              if (millis() - ultimoReporte > 1000) {
+                Serial.println("\n-- Estado actual --");
+                Serial.print("M1: ");
+                Serial.print(motor1.getPosicion());
+                Serial.print(" pulsos, L=");
+                Serial.print(L1, 2);
+                Serial.print(" mm (obj: ");
+                Serial.print(dL1, 2);
+                Serial.println(" mm)");
+                Serial.print("M2: ");
+                Serial.print(motor2.getPosicion());
+                Serial.print(" pulsos, L=");
+                Serial.print(L2, 2);
+                Serial.print(" mm (obj: ");
+                Serial.print(dL2, 2);
+                Serial.println(" mm)");
+                Serial.print("M3: ");
+                Serial.print(motor3.getPosicion());
+                Serial.print(" pulsos, L=");
+                Serial.print(L3, 2);
+                Serial.print(" mm (obj: ");
+                Serial.print(dL3, 2);
+                Serial.println(" mm)");
+                ultimoReporte = millis();
+              }
               
               delay(10);
             }
