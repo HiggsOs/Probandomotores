@@ -189,7 +189,7 @@ void Motor::calibrarRevolucion() {
 // Girar un número específico de grados
 void Motor::girarGrados(float grados) {
   // Calcular pulsos necesarios usando el valor configurable
-  long pulsosObjetivo = (long)((grados / 360.0) * pulsosPorRevolucion);
+  long pulsosObjetivo = gradosAPulsos(grados);
   
   Serial.print("Girando ");
   Serial.print(grados);
@@ -220,6 +220,16 @@ void Motor::girarGrados(float grados) {
   Serial.print(" pulsos, Real: ");
   Serial.print(pulsosReales);
   Serial.println(" pulsos");
+}
+
+// Calcular pulsos necesarios para girar un número de grados
+long Motor::gradosAPulsos(float grados) {
+  return (long)((grados / 360.0) * pulsosPorRevolucion);
+}
+
+// Calcular grados equivalentes a un número de pulsos
+float Motor::pulsosAGrados(long pulsos) {
+  return (float)(pulsos * 360.0) / pulsosPorRevolucion;
 }
 
 // Métodos para configurar y obtener pulsos por revolución

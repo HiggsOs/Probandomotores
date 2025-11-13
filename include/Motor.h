@@ -73,6 +73,20 @@ class Motor {
     void girarGrados(float grados);
     
     /**
+     * @brief Calcula los pulsos necesarios para girar un número de grados
+     * @param grados Grados a convertir
+     * @return Número de pulsos necesarios (incluye signo)
+     */
+    long gradosAPulsos(float grados);
+    
+    /**
+     * @brief Calcula los grados equivalentes a un número de pulsos
+     * @param pulsos Número de pulsos
+     * @return Grados equivalentes
+     */
+    float pulsosAGrados(long pulsos);
+    
+    /**
      * @brief Establece el número de pulsos por revolución
      * @param pulsos Nuevo valor de pulsos por revolución
      */

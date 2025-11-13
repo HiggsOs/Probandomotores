@@ -1,10 +1,14 @@
 #include <Arduino.h>
 #include "Motor.h"
+#include "CinematicaInversa.h"
 
 // Crear instancias de los 3 motores con los parámetros especificados
 Motor motor1(18, 5, 25, 26, 25200);     // ENCA= 25, ENCB 26
 Motor motor2(17, 16, 32, 33, 25200);  // ENCA= 32, ENCB 33
 Motor motor3(23, 19, 27, 4, 25200);
+
+// Crear instancia de cinemática inversa
+CinematicaInversa cinematica;
 
 // Variables para detectar si el encoder está funcionando
 unsigned long ultimaActualizacion1 = 0;
@@ -396,6 +400,10 @@ void setup() {
   Serial.println("    M3 [grados]  → Mover Motor 3 (ej: M3 90)");
   Serial.println("    ALL [g1] [g2] [g3] → Mover los 3 motores simultáneamente");
   Serial.println("");
+  Serial.println("• Cinemática inversa:");
+  Serial.println("    CI [azimuth] [elevacion] → Calcular sin mover");
+  Serial.println("    CIM [azimuth] [elevacion] → Calcular y mover");
+  Serial.println("");
   Serial.println("• Seguridad:");
   Serial.println("    STOP o S     → Parada de emergencia");
   Serial.println("    r            → Resetear encoders a 0");
@@ -406,6 +414,8 @@ void setup() {
   Serial.println("    M2 -180     → Motor 2, 180° antihorario");
   Serial.println("    M3 90       → Motor 3, 90° horario");
   Serial.println("    ALL 90 180 -90 → M1=90°, M2=180°, M3=-90°");
+  Serial.println("    CI 180 45   → Calcular para azimuth=180°, elev=45°");
+  Serial.println("    CIM 180 45  → Calcular y mover a azimuth=180°, elev=45°");
   Serial.println("");
   Serial.println("• Comandos especiales:");
   Serial.println("    pos       → Ver posiciones de todos");
@@ -622,14 +632,111 @@ void loop() {
           Serial.println("   Ejemplo: ALL 90 180 -90\n");
         }
       }
+      // Comando CI - Cinemática Inversa (calcular sin mover)
+      else if (comando.startsWith("CI ")) {
+        // Extraer azimuth y elevación
+        String argumentos = comando.substring(3);
+        argumentos.trim();
+        
+        int espacio = argumentos.indexOf(' ');
+        
+        if (espacio > 0) {
+          String strAzimuth = argumentos.substring(0, espacio);
+          String strElevacion = argumentos.substring(espacio + 1);
+          
+          float azimuth = strAzimuth.toFloat();
+          float elevacion = strElevacion.toFloat();
+          
+          // Validar rangos
+          if (azimuth >= 0 && azimuth <= 360 && elevacion >= 0 && elevacion <= 90) {
+            // Calcular cinemática inversa con salida detallada
+            ResultadoMovimiento resultado = cinematica.calcularMovimiento(azimuth, elevacion, true);
+            
+            // Calcular pulsos necesarios
+            long pulsos1 = motor1.gradosAPulsos(resultado.motor1);
+            long pulsos2 = motor2.gradosAPulsos(resultado.motor2);
+            long pulsos3 = motor3.gradosAPulsos(resultado.motor3);
+            
+            Serial.println("\n========== CONVERSIÓN A PULSOS ==========");
+            Serial.print("Motor 1: ");
+            Serial.print(pulsos1);
+            Serial.println(" pulsos");
+            Serial.print("Motor 2: ");
+            Serial.print(pulsos2);
+            Serial.println(" pulsos");
+            Serial.print("Motor 3: ");
+            Serial.print(pulsos3);
+            Serial.println(" pulsos");
+            Serial.println("=========================================");
+            Serial.println("\n💡 Usa CIM para calcular Y mover\n");
+          } else {
+            Serial.println("❌ Error: Valores fuera de rango");
+            Serial.println("   Azimuth: 0-360°");
+            Serial.println("   Elevación: 0-90°\n");
+          }
+        } else {
+          Serial.println("❌ Error: Debes especificar azimuth y elevación");
+          Serial.println("   Formato: CI [azimuth] [elevacion]");
+          Serial.println("   Ejemplo: CI 180 45\n");
+        }
+      }
+      // Comando CIM - Cinemática Inversa y Mover
+      else if (comando.startsWith("CIM ")) {
+        // Extraer azimuth y elevación
+        String argumentos = comando.substring(4);
+        argumentos.trim();
+        
+        int espacio = argumentos.indexOf(' ');
+        
+        if (espacio > 0) {
+          String strAzimuth = argumentos.substring(0, espacio);
+          String strElevacion = argumentos.substring(espacio + 1);
+          
+          float azimuth = strAzimuth.toFloat();
+          float elevacion = strElevacion.toFloat();
+          
+          // Validar rangos
+          if (azimuth >= 0 && azimuth <= 360 && elevacion >= 0 && elevacion <= 90) {
+            // Calcular cinemática inversa con salida detallada
+            ResultadoMovimiento resultado = cinematica.calcularMovimiento(azimuth, elevacion, true);
+            
+            Serial.println("\n🚀 Iniciando movimiento basado en cinemática inversa...\n");
+            
+            // Ejecutar movimiento simultáneo de los 3 motores
+            bool exito = moverMotoresSimultaneos(resultado.motor1, resultado.motor2, resultado.motor3);
+            
+            if (exito) {
+              Serial.println("✓ Sistema posicionado correctamente");
+              Serial.print("   Azimuth objetivo: ");
+              Serial.print(azimuth, 1);
+              Serial.println("°");
+              Serial.print("   Elevación objetivo: ");
+              Serial.print(elevacion, 1);
+              Serial.println("°\n");
+            } else {
+              Serial.println("⚠ Movimiento terminado con errores\n");
+            }
+          } else {
+            Serial.println("❌ Error: Valores fuera de rango");
+            Serial.println("   Azimuth: 0-360°");
+            Serial.println("   Elevación: 0-90°\n");
+          }
+        } else {
+          Serial.println("❌ Error: Debes especificar azimuth y elevación");
+          Serial.println("   Formato: CIM [azimuth] [elevacion]");
+          Serial.println("   Ejemplo: CIM 180 45\n");
+        }
+      }
       // Comando no reconocido
       else {
-        Serial.println("\n Comando no reconocido\n");
+        Serial.println("\n❌ Comando no reconocido\n");
         Serial.println("COMANDOS DISPONIBLES:");
         Serial.println("  M1 [grados]       → Mover Motor 1");
         Serial.println("  M2 [grados]       → Mover Motor 2");
         Serial.println("  M3 [grados]       → Mover Motor 3");
         Serial.println("  ALL [g1] [g2] [g3] → Mover los 3 simultáneamente");
+        Serial.println("  CI [az] [el]      → Calcular cinemática inversa");
+        Serial.println("  CIM [az] [el]     → Calcular y mover");
         Serial.println("  STOP o S          → Parada de emergencia");
         Serial.println("  R                 → Reset todos los encoders");
         Serial.println("  R1/R2/R3          → Reset encoder individual");
@@ -639,6 +746,8 @@ void loop() {
         Serial.println("  M1 360         → Motor 1, 360° horario");
         Serial.println("  M2 -180        → Motor 2, 180° antihorario");
         Serial.println("  ALL 90 180 -90 → M1=90°, M2=180°, M3=-90°");
+        Serial.println("  CI 180 45      → Calcular para azimuth=180°, elev=45°");
+        Serial.println("  CIM 180 45     → Calcular y mover a esa posición");
         Serial.println("  S              → Parar todo\n");
       }
       
