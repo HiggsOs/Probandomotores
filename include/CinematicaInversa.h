@@ -48,14 +48,14 @@ private:
     float H;  // Altura de la plataforma (mm)
     
     // Coordenadas de las juntas proximales (base) - en mm
-    Coordenada3D A1;
-    Coordenada3D A2;
-    Coordenada3D A3;
+    Coordenada3D Base1;
+    Coordenada3D Base2;
+    Coordenada3D Base3;
     
     // Coordenadas de las juntas distales (plataforma móvil) - en mm
-    Coordenada3D B1;
-    Coordenada3D B2;
-    Coordenada3D B3;
+    Coordenada3D Plat1;
+    Coordenada3D Plat2;
+    Coordenada3D Plat3;
     
     // ========== PARÁMETROS DE CONVERSIÓN ==========
     float RADIO_POLEA;        // Radio de la polea (mm)

@@ -11,14 +11,14 @@ CinematicaInversa::CinematicaInversa() {
     H = 435.0;
     
     // Coordenadas de las juntas proximales (base) - en mm
-    A1 = {60.79, 69.14, 19.27};
-    A2 = {-91.59, 19.82, 19.27};
-    A3 = {23.48, -92.72, 19.27};
+    Base1 = {60.79, 69.14, 19.27};
+    Base2 = {-91.59, 19.82, 19.27};
+    Base3 = {23.48, -92.72, 19.27};
     
     // Coordenadas de las juntas distales (plataforma móvil) - en mm
-    B1 = {84.2, 92.47, 24.05};
-    B2 = {-122.18, 26.69, 24.05};
-    B3 = {40.88, -130.9, 24.05};
+    Plat1 = {84.2, 92.47, 24.05};
+    Plat2 = {-122.18, 26.69, 24.05};
+    Plat3 = {40.88, -130.9, 24.05};
     
     // ========== PARÁMETROS DE CONVERSIÓN ==========
     // Radio de la polea (mm)
@@ -32,9 +32,9 @@ CinematicaInversa::CinematicaInversa() {
     MM_A_GRADOS = (180.0 / (PI * RADIO_POLEA)) * FACTOR_REDUCCION;
     
     // Calcular longitudes iniciales (posición neutra: 0°, 0°)
-    Li1 = calcularLongitudCable(A1, B1, 0, 0);
-    Li2 = calcularLongitudCable(A2, B2, 0, 0);
-    Li3 = calcularLongitudCable(A3, B3, 0, 0);
+    Li1 = calcularLongitudCable(Base1, Plat1, 0, 0);
+    Li2 = calcularLongitudCable(Base2, Plat2, 0, 0);
+    Li3 = calcularLongitudCable(Base3, Plat3, 0, 0);
     
     imprimirInfo();
 }
@@ -110,9 +110,9 @@ ResultadoMovimiento CinematicaInversa::calcularMovimiento(float azimuth_deg,
     }
     
     // Calcular longitudes deseadas usando cinemática inversa
-    float dL1 = calcularLongitudCable(A1, B1, tx_rad, ty_rad);
-    float dL2 = calcularLongitudCable(A2, B2, tx_rad, ty_rad);
-    float dL3 = calcularLongitudCable(A3, B3, tx_rad, ty_rad);
+    float dL1 = calcularLongitudCable(Base1, Plat1, tx_rad, ty_rad);
+    float dL2 = calcularLongitudCable(Base2, Plat2, tx_rad, ty_rad);
+    float dL3 = calcularLongitudCable(Base3, Plat3, tx_rad, ty_rad);
     
     if (verbose) {
         Serial.println(F("\nLongitudes deseadas:"));
