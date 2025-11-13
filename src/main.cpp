@@ -110,7 +110,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       motor1.mover(0);
       motor2.mover(0);
       motor3.mover(0);
-      Serial.println("\n🛑 PARADA DE EMERGENCIA ACTIVADA");
+      Serial.println("\n PARADA DE EMERGENCIA ACTIVADA");
       Serial.println("Posiciones finales:");
       Serial.print("  Motor 1: ");
       Serial.print(motor1.getPosicion());
@@ -146,7 +146,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion1 > TIMEOUT_ENCODER) {
         motor1.mover(0);
-        Serial.println("\n❌ ERROR Motor 1: Encoder no detectado");
+        Serial.println("\n ERROR Motor 1: Encoder no detectado");
         errorDetectado = true;
         motor1Completado = true;
       }
@@ -162,7 +162,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion2 > TIMEOUT_ENCODER) {
         motor2.mover(0);
-        Serial.println("❌ ERROR Motor 2: Encoder no detectado");
+        Serial.println(" ERROR Motor 2: Encoder no detectado");
         errorDetectado = true;
         motor2Completado = true;
       }
@@ -178,7 +178,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion3 > TIMEOUT_ENCODER) {
         motor3.mover(0);
-        Serial.println("❌ ERROR Motor 3: Encoder no detectado");
+        Serial.println(" ERROR Motor 3: Encoder no detectado");
         errorDetectado = true;
         motor3Completado = true;
       }
@@ -288,7 +288,7 @@ bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaAc
     // Verificar parada de emergencia
     if (paradaEmergencia) {
       motor.mover(0);
-      Serial.println("\n🛑 PARADA DE EMERGENCIA ACTIVADA");
+      Serial.println("\n PARADA DE EMERGENCIA ACTIVADA");
       Serial.print("Posición final: ");
       Serial.print(motor.getPosicion());
       Serial.println(" pulsos\n");
@@ -310,7 +310,7 @@ bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaAc
     // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo
     if (millis() - ultimaActualizacion > TIMEOUT_ENCODER) {
       motor.mover(0);
-      Serial.print("\n❌ ERROR: ");
+      Serial.print("\n ERROR: ");
       Serial.print(nombreMotor);
       Serial.println(" - Encoder no detectado. Motor detenido.");
       Serial.print("Última actualización hace: ");
@@ -542,7 +542,7 @@ void loop() {
             nombreMotor = "Motor 3";
             break;
           default:
-            Serial.println("❌ Error: Motor no válido (usa M1, M2 o M3)\n");
+            Serial.println(" Error: Motor no válido (usa M1, M2 o M3)\n");
             return;
         }
         
@@ -617,17 +617,17 @@ void loop() {
             bool exito = moverMotoresSimultaneos(grados1, grados2, grados3);
             
             if (exito) {
-              Serial.println("✓ Todos los motores completados exitosamente\n");
+              Serial.println(" Todos los motores completados exitosamente\n");
             } else {
-              Serial.println("⚠ Movimiento terminado con errores\n");
+              Serial.println(" Movimiento terminado con errores\n");
             }
           } else {
-            Serial.println("❌ Error: Valores no válidos");
+            Serial.println(" Error: Valores no válidos");
             Serial.println("   Usa formato: ALL [g1] [g2] [g3]");
             Serial.println("   Ejemplo: ALL 90 180 -90\n");
           }
         } else {
-          Serial.println("❌ Error: Debes especificar 3 valores");
+          Serial.println(" Error: Debes especificar 3 valores");
           Serial.println("   Formato: ALL [grados1] [grados2] [grados3]");
           Serial.println("   Ejemplo: ALL 90 180 -90\n");
         }
@@ -668,14 +668,14 @@ void loop() {
             Serial.print(pulsos3);
             Serial.println(" pulsos");
             Serial.println("=========================================");
-            Serial.println("\n💡 Usa CIM para calcular Y mover\n");
+            Serial.println("\n Usa CIM para calcular Y mover\n");
           } else {
-            Serial.println("❌ Error: Valores fuera de rango");
+            Serial.println(" Error: Valores fuera de rango");
             Serial.println("   Azimuth: 0-360°");
             Serial.println("   Elevación: 0-90°\n");
           }
         } else {
-          Serial.println("❌ Error: Debes especificar azimuth y elevación");
+          Serial.println(" Error: Debes especificar azimuth y elevación");
           Serial.println("   Formato: CI [azimuth] [elevacion]");
           Serial.println("   Ejemplo: CI 180 45\n");
         }
@@ -700,36 +700,36 @@ void loop() {
             // Calcular cinemática inversa con salida detallada
             ResultadoMovimiento resultado = cinematica.calcularMovimiento(azimuth, elevacion, true);
             
-            Serial.println("\n🚀 Iniciando movimiento basado en cinemática inversa...\n");
+            Serial.println("\n Iniciando movimiento basado en cinemática inversa...\n");
             
             // Ejecutar movimiento simultáneo de los 3 motores
             bool exito = moverMotoresSimultaneos(resultado.motor1, resultado.motor2, resultado.motor3);
             
             if (exito) {
-              Serial.println("✓ Sistema posicionado correctamente");
+              Serial.println(" Sistema posicionado correctamente");
               Serial.print("   Azimuth objetivo: ");
               Serial.print(azimuth, 1);
               Serial.println("°");
-              Serial.print("   Elevación objetivo: ");
+              Serial.print("  Elevación objetivo: ");
               Serial.print(elevacion, 1);
               Serial.println("°\n");
             } else {
-              Serial.println("⚠ Movimiento terminado con errores\n");
+              Serial.println(" Movimiento terminado con errores\n");
             }
           } else {
-            Serial.println("❌ Error: Valores fuera de rango");
+            Serial.println(" Error: Valores fuera de rango");
             Serial.println("   Azimuth: 0-360°");
             Serial.println("   Elevación: 0-90°\n");
           }
         } else {
-          Serial.println("❌ Error: Debes especificar azimuth y elevación");
+          Serial.println(" Error: Debes especificar azimuth y elevación");
           Serial.println("   Formato: CIM [azimuth] [elevacion]");
           Serial.println("   Ejemplo: CIM 180 45\n");
         }
       }
       // Comando no reconocido
       else {
-        Serial.println("\n❌ Comando no reconocido\n");
+        Serial.println("\n Comando no reconocido\n");
         Serial.println("COMANDOS DISPONIBLES:");
         Serial.println("  M1 [grados]       → Mover Motor 1");
         Serial.println("  M2 [grados]       → Mover Motor 2");
