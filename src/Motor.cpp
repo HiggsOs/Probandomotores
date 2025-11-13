@@ -254,3 +254,9 @@ int Motor::getPinEncB() {
 volatile long* Motor::getPosicionPtr() { 
   return &posicion; 
 }
+
+// Resetear posición del encoder a cero
+void Motor::resetPosicion() {
+  posicion = 0;
+  posicionAnterior = 0;
+}

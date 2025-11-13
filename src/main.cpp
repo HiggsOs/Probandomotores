@@ -2,8 +2,8 @@
 #include "Motor.h"
 
 // Crear instancias de los 3 motores con los parámetros especificados
-Motor motor1(18, 5, 25, 26, 25200);
-Motor motor2(17, 16, 32, 33, 25200);  // Pines I1 e I2 invertidos para corregir dirección
+Motor motor1(18, 5, 25, 26, 25200);     // ENCA= 25, ENCB 26
+Motor motor2(17, 16, 32, 33, 25200);  // ENCA= 32, ENCB 33
 Motor motor3(23, 19, 27, 4, 25200);
 
 // Variables para detectar si el encoder está funcionando
@@ -13,6 +13,9 @@ unsigned long ultimaActualizacion3 = 0;
 
 // Tiempo máximo sin cambio en encoder (ms) antes de detener el motor
 const unsigned long TIMEOUT_ENCODER = 100;  // 100ms sin cambio = detener
+
+// Variable para parada de emergencia
+volatile bool paradaEmergencia = false;
 
 // Funciones de interrupción para cada motor
 void IRAM_ATTR encoderMotor1() {
@@ -31,7 +34,219 @@ void IRAM_ATTR encoderMotor3() {
 }
 
 /**
- * @brief Gira un motor con detección de encoder
+ * @brief Mueve los 3 motores simultáneamente a los ángulos especificados
+ * @param grados1 Grados para Motor 1
+ * @param grados2 Grados para Motor 2
+ * @param grados3 Grados para Motor 3
+ * @return true si todos completaron exitosamente, false si alguno falló
+ */
+bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
+  // Calcular pulsos objetivo para cada motor
+  long pulsos1 = (long)((grados1 / 360.0) * motor1.getPulsosPorRevolucion());
+  long pulsos2 = (long)((grados2 / 360.0) * motor2.getPulsosPorRevolucion());
+  long pulsos3 = (long)((grados3 / 360.0) * motor3.getPulsosPorRevolucion());
+  
+  Serial.println("\n========== MOVIMIENTO SIMULTÁNEO ==========");
+  Serial.print("Motor 1: ");
+  Serial.print(grados1, 1);
+  Serial.print("° (");
+  Serial.print(abs(pulsos1));
+  Serial.println(" pulsos)");
+  
+  Serial.print("Motor 2: ");
+  Serial.print(grados2, 1);
+  Serial.print("° (");
+  Serial.print(abs(pulsos2));
+  Serial.println(" pulsos)");
+  
+  Serial.print("Motor 3: ");
+  Serial.print(grados3, 1);
+  Serial.print("° (");
+  Serial.print(abs(pulsos3));
+  Serial.println(" pulsos)");
+  Serial.println("Presiona 'S' o 'STOP' para parada de emergencia\n");
+  
+  // Guardar posiciones iniciales
+  long pos1Inicial = motor1.getPosicion();
+  long pos2Inicial = motor2.getPosicion();
+  long pos3Inicial = motor3.getPosicion();
+  
+  // Determinar direcciones
+  int dir1 = (pulsos1 >= 0) ? 1 : -1;
+  int dir2 = (pulsos2 >= 0) ? 1 : -1;
+  int dir3 = (pulsos3 >= 0) ? 1 : -1;
+  
+  pulsos1 = abs(pulsos1);
+  pulsos2 = abs(pulsos2);
+  pulsos3 = abs(pulsos3);
+  
+  // Resetear tiempos y parada de emergencia
+  ultimaActualizacion1 = millis();
+  ultimaActualizacion2 = millis();
+  ultimaActualizacion3 = millis();
+  paradaEmergencia = false;
+  
+  // Banderas para saber qué motores han terminado
+  bool motor1Completado = (pulsos1 == 0);
+  bool motor2Completado = (pulsos2 == 0);
+  bool motor3Completado = (pulsos3 == 0);
+  
+  // Iniciar todos los motores
+  if (!motor1Completado) motor1.mover(dir1);
+  if (!motor2Completado) motor2.mover(dir2);
+  if (!motor3Completado) motor3.mover(dir3);
+  
+  unsigned long ultimoReporte = millis();
+  bool errorDetectado = false;
+  
+  // Continuar mientras al menos un motor esté activo
+  while (!motor1Completado || !motor2Completado || !motor3Completado) {
+    // Verificar parada de emergencia
+    if (paradaEmergencia) {
+      motor1.mover(0);
+      motor2.mover(0);
+      motor3.mover(0);
+      Serial.println("\n🛑 PARADA DE EMERGENCIA ACTIVADA");
+      Serial.println("Posiciones finales:");
+      Serial.print("  Motor 1: ");
+      Serial.print(motor1.getPosicion());
+      Serial.println(" pulsos");
+      Serial.print("  Motor 2: ");
+      Serial.print(motor2.getPosicion());
+      Serial.println(" pulsos");
+      Serial.print("  Motor 3: ");
+      Serial.print(motor3.getPosicion());
+      Serial.println(" pulsos\n");
+      paradaEmergencia = false;
+      return false;
+    }
+    
+    // Verificar comando de stop desde serial
+    if (Serial.available() > 0) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      cmd.toUpperCase();
+      if (cmd == "S" || cmd == "STOP") {
+        paradaEmergencia = true;
+        continue;
+      }
+    }
+    
+    // Verificar y detener Motor 1 si alcanzó objetivo
+    if (!motor1Completado) {
+      if (abs(motor1.getPosicion() - pos1Inicial) >= pulsos1) {
+        motor1.mover(0);
+        motor1Completado = true;
+        Serial.println("\n✓ Motor 1 completado");
+      }
+      // Verificar timeout del encoder
+      else if (millis() - ultimaActualizacion1 > TIMEOUT_ENCODER) {
+        motor1.mover(0);
+        Serial.println("\n❌ ERROR Motor 1: Encoder no detectado");
+        errorDetectado = true;
+        motor1Completado = true;
+      }
+    }
+    
+    // Verificar y detener Motor 2 si alcanzó objetivo
+    if (!motor2Completado) {
+      if (abs(motor2.getPosicion() - pos2Inicial) >= pulsos2) {
+        motor2.mover(0);
+        motor2Completado = true;
+        Serial.println("✓ Motor 2 completado");
+      }
+      // Verificar timeout del encoder
+      else if (millis() - ultimaActualizacion2 > TIMEOUT_ENCODER) {
+        motor2.mover(0);
+        Serial.println("❌ ERROR Motor 2: Encoder no detectado");
+        errorDetectado = true;
+        motor2Completado = true;
+      }
+    }
+    
+    // Verificar y detener Motor 3 si alcanzó objetivo
+    if (!motor3Completado) {
+      if (abs(motor3.getPosicion() - pos3Inicial) >= pulsos3) {
+        motor3.mover(0);
+        motor3Completado = true;
+        Serial.println("✓ Motor 3 completado");
+      }
+      // Verificar timeout del encoder
+      else if (millis() - ultimaActualizacion3 > TIMEOUT_ENCODER) {
+        motor3.mover(0);
+        Serial.println("❌ ERROR Motor 3: Encoder no detectado");
+        errorDetectado = true;
+        motor3Completado = true;
+      }
+    }
+    
+    // Mostrar progreso cada 300ms
+    if (millis() - ultimoReporte > 300) {
+      Serial.print("\r");
+      
+      if (!motor1Completado) {
+        long p1 = abs(motor1.getPosicion() - pos1Inicial);
+        Serial.print("M1:");
+        Serial.print((float)p1 / pulsos1 * 100.0, 0);
+        Serial.print("% ");
+      }
+      
+      if (!motor2Completado) {
+        long p2 = abs(motor2.getPosicion() - pos2Inicial);
+        Serial.print("M2:");
+        Serial.print((float)p2 / pulsos2 * 100.0, 0);
+        Serial.print("% ");
+      }
+      
+      if (!motor3Completado) {
+        long p3 = abs(motor3.getPosicion() - pos3Inicial);
+        Serial.print("M3:");
+        Serial.print((float)p3 / pulsos3 * 100.0, 0);
+        Serial.print("%   ");
+      }
+      
+      ultimoReporte = millis();
+    }
+    
+    delay(1);
+  }
+  
+  // Asegurar que todos estén detenidos
+  motor1.mover(0);
+  motor2.mover(0);
+  motor3.mover(0);
+  
+  // Mostrar resultados finales
+  Serial.println("\n\n========== MOVIMIENTO COMPLETADO ==========");
+  
+  Serial.print("Motor 1: Objetivo=");
+  Serial.print(pulsos1);
+  Serial.print(" Real=");
+  Serial.print(abs(motor1.getPosicion() - pos1Inicial));
+  Serial.print(" Pos=");
+  Serial.println(motor1.getPosicion());
+  
+  Serial.print("Motor 2: Objetivo=");
+  Serial.print(pulsos2);
+  Serial.print(" Real=");
+  Serial.print(abs(motor2.getPosicion() - pos2Inicial));
+  Serial.print(" Pos=");
+  Serial.println(motor2.getPosicion());
+  
+  Serial.print("Motor 3: Objetivo=");
+  Serial.print(pulsos3);
+  Serial.print(" Real=");
+  Serial.print(abs(motor3.getPosicion() - pos3Inicial));
+  Serial.print(" Pos=");
+  Serial.println(motor3.getPosicion());
+  
+  Serial.println("===========================================\n");
+  
+  return !errorDetectado;
+}
+
+/**
+ * @brief Gira un motor con detección de encoder y visualización en tiempo real
  * @param motor Referencia al motor a girar
  * @param grados Grados a girar (positivo=horario, negativo=antihorario)
  * @param ultimaActualizacion Referencia al tiempo de última actualización del encoder
@@ -42,54 +257,102 @@ bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaAc
   // Calcular pulsos necesarios
   long pulsosObjetivo = (long)((grados / 360.0) * motor.getPulsosPorRevolucion());
   
+  Serial.print("\n");
   Serial.print(nombreMotor);
   Serial.print(": Girando ");
-  Serial.print(grados);
+  Serial.print(grados, 1);
   Serial.print(" grados (");
   Serial.print(abs(pulsosObjetivo));
   Serial.println(" pulsos)");
+  Serial.println("Presiona 'S' o 'STOP' para parada de emergencia\n");
   
   long posicionInicial = motor.getPosicion();
   int direccion = (pulsosObjetivo >= 0) ? 1 : -1;  // 1 para horario, -1 para antihorario
   pulsosObjetivo = abs(pulsosObjetivo);
   
-  // Resetear tiempo de última actualización
+  // Resetear tiempo de última actualización y parada de emergencia
   ultimaActualizacion = millis();
+  paradaEmergencia = false;
   
   // Comenzar movimiento
   motor.mover(direccion);
   
+  unsigned long ultimoReporte = millis();
+  
   // Continuar hasta alcanzar el objetivo
   while (abs(motor.getPosicion() - posicionInicial) < pulsosObjetivo) {
+    // Verificar parada de emergencia
+    if (paradaEmergencia) {
+      motor.mover(0);
+      Serial.println("\n🛑 PARADA DE EMERGENCIA ACTIVADA");
+      Serial.print("Posición final: ");
+      Serial.print(motor.getPosicion());
+      Serial.println(" pulsos\n");
+      paradaEmergencia = false;
+      return false;
+    }
+    
+    // Verificar comando de stop desde serial
+    if (Serial.available() > 0) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      cmd.toUpperCase();
+      if (cmd == "S" || cmd == "STOP") {
+        paradaEmergencia = true;
+        continue;
+      }
+    }
+    
     // DETECCIÓN CRÍTICA: Verificar si el encoder está respondiendo
     if (millis() - ultimaActualizacion > TIMEOUT_ENCODER) {
-      // ¡ENCODER NO DETECTADO! Detener inmediatamente
       motor.mover(0);
-      Serial.print("❌ ERROR: ");
+      Serial.print("\n❌ ERROR: ");
       Serial.print(nombreMotor);
       Serial.println(" - Encoder no detectado. Motor detenido.");
       Serial.print("Última actualización hace: ");
       Serial.print(millis() - ultimaActualizacion);
-      Serial.println(" ms");
-      return false;  // Indicar falla
+      Serial.println(" ms\n");
+      return false;
     }
     
-    delay(1);  // Delay mínimo para no saturar
+    // Mostrar progreso cada 200ms
+    if (millis() - ultimoReporte > 200) {
+      long pulsosActuales = abs(motor.getPosicion() - posicionInicial);
+      float porcentaje = (float)pulsosActuales / pulsosObjetivo * 100.0;
+      
+      Serial.print("\r");  // Retorno de carro para actualizar en la misma línea
+      Serial.print("Progreso: ");
+      Serial.print(pulsosActuales);
+      Serial.print(" / ");
+      Serial.print(pulsosObjetivo);
+      Serial.print(" pulsos (");
+      Serial.print(porcentaje, 1);
+      Serial.print("%)   ");
+      
+      ultimoReporte = millis();
+    }
+    
+    delay(1);
   }
   
   // Detener motor al alcanzar el objetivo
   motor.mover(0);
   
   long pulsosReales = abs(motor.getPosicion() - posicionInicial);
-  Serial.print("✓ ");
+  Serial.print("\n\n✓ ");
   Serial.print(nombreMotor);
-  Serial.print(" completado - Objetivo: ");
+  Serial.print(" completado");
+  Serial.print("\n  Objetivo: ");
   Serial.print(pulsosObjetivo);
-  Serial.print(" pulsos, Real: ");
+  Serial.print(" pulsos");
+  Serial.print("\n  Real: ");
   Serial.print(pulsosReales);
-  Serial.println(" pulsos");
+  Serial.print(" pulsos");
+  Serial.print("\n  Posición total: ");
+  Serial.print(motor.getPosicion());
+  Serial.println(" pulsos\n");
   
-  return true;  // Éxito
+  return true;
 }
 
 void setup() {
@@ -127,11 +390,22 @@ void setup() {
   Serial.println("========================================");
   Serial.println("COMANDOS DISPONIBLES:");
   Serial.println("========================================");
+  Serial.println("• Control de motores:");
+  Serial.println("    M1 [grados]  → Mover Motor 1 (ej: M1 360)");
+  Serial.println("    M2 [grados]  → Mover Motor 2 (ej: M2 -180)");
+  Serial.println("    M3 [grados]  → Mover Motor 3 (ej: M3 90)");
+  Serial.println("    ALL [g1] [g2] [g3] → Mover los 3 motores simultáneamente");
+  Serial.println("");
+  Serial.println("• Seguridad:");
+  Serial.println("    STOP o S     → Parada de emergencia");
+  Serial.println("    r            → Resetear encoders a 0");
+  Serial.println("");
   Serial.println("• Formato: M[motor] [grados]");
   Serial.println("  Ejemplos:");
-  Serial.println("    M1 360    → Motor 1, 360° horario");
-  Serial.println("    M2 -180   → Motor 2, 180° antihorario");
-  Serial.println("    M3 90     → Motor 3, 90° horario");
+  Serial.println("    M1 360      → Motor 1, 360° horario");
+  Serial.println("    M2 -180     → Motor 2, 180° antihorario");
+  Serial.println("    M3 90       → Motor 3, 90° horario");
+  Serial.println("    ALL 90 180 -90 → M1=90°, M2=180°, M3=-90°");
   Serial.println("");
   Serial.println("• Comandos especiales:");
   Serial.println("    pos       → Ver posiciones de todos");
@@ -159,8 +433,49 @@ void loop() {
       Serial.print("\n> Comando recibido: ");
       Serial.println(comando);
       
+      // Comando STOP / S - Parada de emergencia
+      if (comando.equals("STOP") || comando.equals("S")) {
+        paradaEmergencia = true;
+        motor1.mover(0);
+        motor2.mover(0);
+        motor3.mover(0);
+        Serial.println("\n PARADA DE EMERGENCIA ACTIVADA 🛑🛑🛑");
+        Serial.println("Todos los motores detenidos.");
+        Serial.println("Posiciones actuales:");
+        Serial.print("  Motor 1: ");
+        Serial.println(motor1.getPosicion());
+        Serial.print("  Motor 2: ");
+        Serial.println(motor2.getPosicion());
+        Serial.print("  Motor 3: ");
+        Serial.println(motor3.getPosicion());
+        Serial.println("\nListo para nuevos comandos.\n");
+        paradaEmergencia = false;  // Resetear para próximo movimiento
+      }
+      // Comando R - Reset de encoders
+      else if (comando.equals("R")) {
+        motor1.resetPosicion();
+        motor2.resetPosicion();
+        motor3.resetPosicion();
+        Serial.println("\n✓ Todos los encoders reseteados a 0");
+        Serial.println("  Motor 1: 0 pulsos");
+        Serial.println("  Motor 2: 0 pulsos");
+        Serial.println("  Motor 3: 0 pulsos\n");
+      }
+      // Comandos R1, R2, R3 - Reset individual
+      else if (comando.equals("R1")) {
+        motor1.resetPosicion();
+        Serial.println("\n✓ Motor 1 reseteado a 0 pulsos\n");
+      }
+      else if (comando.equals("R2")) {
+        motor2.resetPosicion();
+        Serial.println("\n✓ Motor 2 reseteado a 0 pulsos\n");
+      }
+      else if (comando.equals("R3")) {
+        motor3.resetPosicion();
+        Serial.println("\n✓ Motor 3 reseteado a 0 pulsos\n");
+      }
       // Comando para ver todas las posiciones
-      if (comando.equals("POS")) {
+      else if (comando.equals("POS")) {
         Serial.println("\n========== POSICIONES ACTUALES ==========");
         
         Serial.print("Motor 1: ");
@@ -239,7 +554,7 @@ void loop() {
           
           // Validar que sea un número válido
           if (grados == 0.0 && argumento != "0" && argumento != "0.0") {
-            Serial.println("❌ Error: Valor no válido");
+            Serial.println(" Error: Valor no válido");
             Serial.println("   Usa formato: M1 360  o  M1 pos\n");
           } else {
             // Ejecutar movimiento
@@ -247,9 +562,9 @@ void loop() {
             bool exito = girarGradosConDeteccion(*motorSeleccionado, grados, *ultimaActualizacion, nombreMotor.c_str());
             
             if (exito) {
-              Serial.println("✓ Movimiento completado\n");
+              Serial.println(" Movimiento completado\n");
             } else {
-              Serial.println("❌ Movimiento fallido - Verifica encoder\n");
+              Serial.println("Movimiento fallido - Verifica encoder\n");
             }
             
             // Mostrar posición final
@@ -258,14 +573,73 @@ void loop() {
             Serial.println(" pulsos\n");
           }
         } else {
-          Serial.println("❌ Error: Falta especificar grados o 'pos'");
+          Serial.println(" Error: Falta especificar grados o 'pos'");
           Serial.println("   Ejemplos: M1 360  o  M1 pos\n");
+        }
+      }
+      // Comando ALL para mover los 3 motores simultáneamente
+      else if (comando.startsWith("ALL ")) {
+        // Extraer los 3 valores de grados
+        String argumentos = comando.substring(4);
+        argumentos.trim();
+        
+        // Parsear los 3 valores separados por espacios
+        int espacio1 = argumentos.indexOf(' ');
+        int espacio2 = argumentos.lastIndexOf(' ');
+        
+        if (espacio1 > 0 && espacio2 > espacio1) {
+          String str1 = argumentos.substring(0, espacio1);
+          String str2 = argumentos.substring(espacio1 + 1, espacio2);
+          String str3 = argumentos.substring(espacio2 + 1);
+          
+          float grados1 = str1.toFloat();
+          float grados2 = str2.toFloat();
+          float grados3 = str3.toFloat();
+          
+          // Validar que sean números válidos
+          bool validos = true;
+          if (grados1 == 0.0 && str1 != "0" && str1 != "0.0") validos = false;
+          if (grados2 == 0.0 && str2 != "0" && str2 != "0.0") validos = false;
+          if (grados3 == 0.0 && str3 != "0" && str3 != "0.0") validos = false;
+          
+          if (validos) {
+            // Ejecutar movimiento simultáneo
+            bool exito = moverMotoresSimultaneos(grados1, grados2, grados3);
+            
+            if (exito) {
+              Serial.println("✓ Todos los motores completados exitosamente\n");
+            } else {
+              Serial.println("⚠ Movimiento terminado con errores\n");
+            }
+          } else {
+            Serial.println("❌ Error: Valores no válidos");
+            Serial.println("   Usa formato: ALL [g1] [g2] [g3]");
+            Serial.println("   Ejemplo: ALL 90 180 -90\n");
+          }
+        } else {
+          Serial.println("❌ Error: Debes especificar 3 valores");
+          Serial.println("   Formato: ALL [grados1] [grados2] [grados3]");
+          Serial.println("   Ejemplo: ALL 90 180 -90\n");
         }
       }
       // Comando no reconocido
       else {
-        Serial.println("❌ Comando no reconocido");
-        Serial.println("   Usa: M1 [grados], M2 [grados], M3 [grados], o 'pos'\n");
+        Serial.println("\n Comando no reconocido\n");
+        Serial.println("COMANDOS DISPONIBLES:");
+        Serial.println("  M1 [grados]       → Mover Motor 1");
+        Serial.println("  M2 [grados]       → Mover Motor 2");
+        Serial.println("  M3 [grados]       → Mover Motor 3");
+        Serial.println("  ALL [g1] [g2] [g3] → Mover los 3 simultáneamente");
+        Serial.println("  STOP o S          → Parada de emergencia");
+        Serial.println("  R                 → Reset todos los encoders");
+        Serial.println("  R1/R2/R3          → Reset encoder individual");
+        Serial.println("  POS               → Ver todas las posiciones");
+        Serial.println("  M1/M2/M3 POS      → Ver posición de un motor");
+        Serial.println("\nEjemplos:");
+        Serial.println("  M1 360         → Motor 1, 360° horario");
+        Serial.println("  M2 -180        → Motor 2, 180° antihorario");
+        Serial.println("  ALL 90 180 -90 → M1=90°, M2=180°, M3=-90°");
+        Serial.println("  S              → Parar todo\n");
       }
       
       Serial.println("Listo para siguiente comando...\n");

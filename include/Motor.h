@@ -113,6 +113,11 @@ class Motor {
      * @return Puntero volatile a la posición
      */
     volatile long* getPosicionPtr();
+    
+    /**
+     * @brief Resetea la posición del encoder a cero
+     */
+    void resetPosicion();
 };
 
 #endif // MOTOR_H
