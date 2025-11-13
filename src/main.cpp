@@ -11,14 +11,21 @@ Motor motor2(17, 16, 32, 33, 25200);  // Pines invertidos para que siga misma co
 Motor motor3(23, 19, 27, 4, 25200);   // Configuración del código que funciona
 
 // ========== CINEMÁTICA INVERSA - STEWART PLATFORM ==========
-// Radio de la polea (mm)
+// Diámetro de la polea medido con calibrador: 17.5 mm
+// Radio de la polea del cable: 8.75 mm
 #define RADIO_POLEA 8.75
 
-// Conversión: ΔL (mm) a grados de rotación
-// Longitud = ángulo × radio → ángulo = longitud / radio
-// En grados: grados = (ΔL / radio) × (180/π)
-// Simplificado: grados = ΔL × 63.66 (para radio = 8.75 mm)
-#define MM_A_GRADOS (180.0 / (PI * RADIO_POLEA))  // ≈ 63.66 grados/mm
+// Factor de reducción mecánica
+// El encoder mide el eje del motor, pero la polea tiene reducción
+// Calculado empíricamente: 207° motor / 2mm cable = 103.5 grados/mm
+// Con radio 8.75mm esperamos: 6.55 grados/mm
+// Factor = 103.5 / 6.55 = 15.8
+#define FACTOR_REDUCCION 1.0
+
+// Conversión: ΔL (mm) a grados de rotación del motor
+// Si no hay reducción: MM_A_GRADOS = 180 / (π × radio) ≈ 6.55 grados/mm
+// Con reducción: dividir por el factor
+#define MM_A_GRADOS ((180.0 / (PI * RADIO_POLEA)) * FACTOR_REDUCCION)
 
 // Altura de la plataforma (mm)
 #define H 435.0
@@ -216,6 +223,190 @@ bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaAc
   Serial.println(" pulsos");
   
   return true;  // Éxito
+}
+
+/**
+ * @brief Mueve los 3 motores simultáneamente hacia sus objetivos
+ * @param grados1 Grados a girar el motor 1
+ * @param grados2 Grados a girar el motor 2
+ * @param grados3 Grados a girar el motor 3
+ * @return true si todos completaron exitosamente, false si hubo algún fallo
+ */
+bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
+  Serial.println("\n--- Moviendo 3 motores simultáneamente ---");
+  
+  // Calcular pulsos objetivo para cada motor
+  long pulsos1 = (long)((grados1 / 360.0) * motor1.getPulsosPorRevolucion());
+  long pulsos2 = (long)((grados2 / 360.0) * motor2.getPulsosPorRevolucion());
+  long pulsos3 = (long)((grados3 / 360.0) * motor3.getPulsosPorRevolucion());
+  
+  Serial.print("Motor 1: ");
+  Serial.print(grados1, 2);
+  Serial.print("° (");
+  Serial.print(abs(pulsos1));
+  Serial.println(" pulsos)");
+  
+  Serial.print("Motor 2: ");
+  Serial.print(grados2, 2);
+  Serial.print("° (");
+  Serial.print(abs(pulsos2));
+  Serial.println(" pulsos)");
+  
+  Serial.print("Motor 3: ");
+  Serial.print(grados3, 2);
+  Serial.print("° (");
+  Serial.print(abs(pulsos3));
+  Serial.println(" pulsos)\n");
+  
+  // Guardar posiciones iniciales
+  long pos1Inicial = motor1.getPosicion();
+  long pos2Inicial = motor2.getPosicion();
+  long pos3Inicial = motor3.getPosicion();
+  
+  // Calcular direcciones
+  int dir1 = (pulsos1 >= 0) ? 1 : -1;
+  int dir2 = (pulsos2 >= 0) ? 1 : -1;
+  int dir3 = (pulsos3 >= 0) ? 1 : -1;
+  
+  // Convertir a valores absolutos
+  pulsos1 = abs(pulsos1);
+  pulsos2 = abs(pulsos2);
+  pulsos3 = abs(pulsos3);
+  
+  // Resetear tiempos de última actualización
+  ultimaActualizacion1 = millis();
+  ultimaActualizacion2 = millis();
+  ultimaActualizacion3 = millis();
+  
+  // Flags para saber qué motores ya terminaron
+  bool motor1Completo = (pulsos1 == 0);
+  bool motor2Completo = (pulsos2 == 0);
+  bool motor3Completo = (pulsos3 == 0);
+  
+  // Iniciar movimiento de todos los motores
+  if (!motor1Completo) motor1.mover(dir1);
+  if (!motor2Completo) motor2.mover(dir2);
+  if (!motor3Completo) motor3.mover(dir3);
+  
+  // Variables para detección de timeout
+  unsigned long tiempoInicio = millis();
+  const unsigned long TIMEOUT_MOVIMIENTO = 30000; // 30 segundos
+  
+  // Variables para reporte de progreso
+  unsigned long ultimoReporte = millis();
+  
+  // Bucle principal - continuar hasta que todos terminen
+  while (!(motor1Completo && motor2Completo && motor3Completo)) {
+    // Verificar timeout general
+    if (millis() - tiempoInicio > TIMEOUT_MOVIMIENTO) {
+      Serial.println("\n❌ TIMEOUT: Movimiento excedió 30 segundos");
+      motor1.mover(0);
+      motor2.mover(0);
+      motor3.mover(0);
+      return false;
+    }
+    
+    // Motor 1: Verificar si alcanzó objetivo
+    if (!motor1Completo) {
+      long pulsosActuales1 = abs(motor1.getPosicion() - pos1Inicial);
+      if (pulsosActuales1 >= pulsos1) {
+        motor1.mover(0);
+        motor1Completo = true;
+        Serial.println("✓ Motor 1 completado");
+      } else {
+        // Verificar encoder
+        if (millis() - ultimaActualizacion1 > TIMEOUT_ENCODER) {
+          Serial.println("❌ Motor 1: Encoder no responde");
+          motor1.mover(0);
+          motor2.mover(0);
+          motor3.mover(0);
+          return false;
+        }
+      }
+    }
+    
+    // Motor 2: Verificar si alcanzó objetivo
+    if (!motor2Completo) {
+      long pulsosActuales2 = abs(motor2.getPosicion() - pos2Inicial);
+      if (pulsosActuales2 >= pulsos2) {
+        motor2.mover(0);
+        motor2Completo = true;
+        Serial.println("✓ Motor 2 completado");
+      } else {
+        // Verificar encoder
+        if (millis() - ultimaActualizacion2 > TIMEOUT_ENCODER) {
+          Serial.println("❌ Motor 2: Encoder no responde");
+          motor1.mover(0);
+          motor2.mover(0);
+          motor3.mover(0);
+          return false;
+        }
+      }
+    }
+    
+    // Motor 3: Verificar si alcanzó objetivo
+    if (!motor3Completo) {
+      long pulsosActuales3 = abs(motor3.getPosicion() - pos3Inicial);
+      if (pulsosActuales3 >= pulsos3) {
+        motor3.mover(0);
+        motor3Completo = true;
+        Serial.println("✓ Motor 3 completado");
+      } else {
+        // Verificar encoder
+        if (millis() - ultimaActualizacion3 > TIMEOUT_ENCODER) {
+          Serial.println("❌ Motor 3: Encoder no responde");
+          motor1.mover(0);
+          motor2.mover(0);
+          motor3.mover(0);
+          return false;
+        }
+      }
+    }
+    
+    // Reporte de progreso cada segundo
+    if (millis() - ultimoReporte > 1000) {
+      Serial.print("Progreso: M1=");
+      Serial.print(abs(motor1.getPosicion() - pos1Inicial));
+      Serial.print("/");
+      Serial.print(pulsos1);
+      Serial.print(", M2=");
+      Serial.print(abs(motor2.getPosicion() - pos2Inicial));
+      Serial.print("/");
+      Serial.print(pulsos2);
+      Serial.print(", M3=");
+      Serial.print(abs(motor3.getPosicion() - pos3Inicial));
+      Serial.print("/");
+      Serial.println(pulsos3);
+      ultimoReporte = millis();
+    }
+    
+    delay(1); // Delay mínimo
+  }
+  
+  // Asegurar que todos están detenidos
+  motor1.mover(0);
+  motor2.mover(0);
+  motor3.mover(0);
+  
+  // Mostrar resultados finales
+  Serial.println("\n✓ Todos los motores completados");
+  Serial.print("  M1: ");
+  Serial.print(abs(motor1.getPosicion() - pos1Inicial));
+  Serial.print(" / ");
+  Serial.print(pulsos1);
+  Serial.println(" pulsos");
+  Serial.print("  M2: ");
+  Serial.print(abs(motor2.getPosicion() - pos2Inicial));
+  Serial.print(" / ");
+  Serial.print(pulsos2);
+  Serial.println(" pulsos");
+  Serial.print("  M3: ");
+  Serial.print(abs(motor3.getPosicion() - pos3Inicial));
+  Serial.print(" / ");
+  Serial.print(pulsos3);
+  Serial.println(" pulsos");
+  
+  return true;
 }
 
 // Variables para detección de movimiento de encoders (OLD - ya no se usa)
@@ -813,44 +1004,10 @@ void loop() {
             float grados2 = deltaL_a_grados(deltaL2);
             float grados3 = deltaL_a_grados(deltaL3);
             
-            Serial.println("\n--- Ejecutando movimientos ---");
+            Serial.println("\n--- Ejecutando movimientos simultáneos ---");
             
-            // Mover cada motor usando la función que funciona
-            bool exito = true;
-            
-            // Motor 1
-            if (abs(grados1) > 0.1) {  // Solo mover si hay cambio significativo
-              if (!girarGradosConDeteccion(motor1, grados1, ultimaActualizacion1, "Motor 1")) {
-                exito = false;
-                Serial.println("❌ Fallo en Motor 1");
-              }
-            } else {
-              Serial.println("Motor 1: Sin cambio necesario");
-            }
-            
-            delay(100);
-            
-            // Motor 2
-            if (abs(grados2) > 0.1) {
-              if (!girarGradosConDeteccion(motor2, grados2, ultimaActualizacion2, "Motor 2")) {
-                exito = false;
-                Serial.println("❌ Fallo en Motor 2");
-              }
-            } else {
-              Serial.println("Motor 2: Sin cambio necesario");
-            }
-            
-            delay(100);
-            
-            // Motor 3
-            if (abs(grados3) > 0.1) {
-              if (!girarGradosConDeteccion(motor3, grados3, ultimaActualizacion3, "Motor 3")) {
-                exito = false;
-                Serial.println("❌ Fallo en Motor 3");
-              }
-            } else {
-              Serial.println("Motor 3: Sin cambio necesario");
-            }
+            // Mover los 3 motores simultáneamente
+            bool exito = moverMotoresSimultaneos(grados1, grados2, grados3);
             
             // Actualizar longitudes finales
             actualizarLongitudesActuales();
