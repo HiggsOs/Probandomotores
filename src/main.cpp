@@ -20,7 +20,7 @@ Motor motor3(23, 19, 27, 4, 25200);   // Configuración del código que funciona
 // Calculado empíricamente: 207° motor / 2mm cable = 103.5 grados/mm
 // Con radio 8.75mm esperamos: 6.55 grados/mm
 // Factor = 103.5 / 6.55 = 15.8
-#define FACTOR_REDUCCION 1.0
+#define FACTOR_REDUCCION 0.063
 
 // Conversión: ΔL (mm) a grados de rotación del motor
 // Si no hay reducción: MM_A_GRADOS = 180 / (π × radio) ≈ 6.55 grados/mm
