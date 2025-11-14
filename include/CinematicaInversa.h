@@ -58,7 +58,8 @@ private:
     Coordenada3D Plat3;
     
     // ========== PARÁMETROS DE CONVERSIÓN ==========
-    float RADIO_POLEA;        // Radio de la polea (mm)
+    float RADIO_POLEA;   
+    float km;     // Radio de la polea (mm)
     float FACTOR_REDUCCION;   // Factor de reducción mecánica
     float MM_A_GRADOS;        // Conversión: ΔL (mm) a grados de rotación
     
@@ -66,6 +67,10 @@ private:
     float Li1;
     float Li2;
     float Li3;
+    
+    // Posición actual del sistema
+    float azimuthActual;
+    float elevacionActual;
     
     /**
      * @brief Calcula la longitud del cable usando cinemática inversa
@@ -102,7 +107,7 @@ public:
     CinematicaInversa();
     
     /**
-     * @brief Calcula los grados que debe mover cada motor para alcanzar la posición solar
+     * @brief Calcula los grados que debe mover cada motor para alcanzar la posición solar (ABSOLUTO desde 0,0)
      * @param azimuth_deg Azimuth del sol en grados (0-360°)
      * @param elevacion_deg Elevación del sol en grados (0-90°)
      * @param verbose Si true, muestra información detallada por Serial
@@ -110,6 +115,44 @@ public:
      */
     ResultadoMovimiento calcularMovimiento(float azimuth_deg, float elevacion_deg, 
                                           bool verbose = true);
+    
+    /**
+     * @brief Calcula los grados que debe mover cada motor INCREMENTALMENTE desde la posición actual
+     * @param azimuth_objetivo Azimuth objetivo en grados (0-360°)
+     * @param elevacion_objetivo Elevación objetivo en grados (0-90°)
+     * @param verbose Si true, muestra información detallada por Serial
+     * @return Estructura ResultadoMovimiento con los grados INCREMENTALES a mover
+     */
+    ResultadoMovimiento calcularMovimientoIncremental(float azimuth_objetivo, 
+                                                      float elevacion_objetivo,
+                                                      bool verbose = true);
+    
+    /**
+     * @brief Actualiza la posición actual del sistema
+     * @param azimuth_deg Azimuth actual en grados
+     * @param elevacion_deg Elevación actual en grados
+     */
+    void actualizarPosicionActual(float azimuth_deg, float elevacion_deg);
+    
+    /**
+     * @brief Obtiene la posición actual del sistema
+     * @param azimuth_deg Salida: azimuth actual
+     * @param elevacion_deg Salida: elevación actual
+     */
+    void obtenerPosicionActual(float& azimuth_deg, float& elevacion_deg) const;
+    
+    /**
+     * @brief Obtiene las longitudes actuales de los cables
+     * @param L1 Salida: longitud actual cable 1
+     * @param L2 Salida: longitud actual cable 2
+     * @param L3 Salida: longitud actual cable 3
+     */
+    void obtenerLongitudesActuales(float& L1, float& L2, float& L3);
+    
+    /**
+     * @brief Resetea la posición actual a la neutra (0, 0)
+     */
+    void resetearPosicion();
     
     /**
      * @brief Obtiene las longitudes iniciales de los cables

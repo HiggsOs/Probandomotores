@@ -141,7 +141,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       if (abs(motor1.getPosicion() - pos1Inicial) >= pulsos1) {
         motor1.mover(0);
         motor1Completado = true;
-        Serial.println("\n✓ Motor 1 completado");
+        Serial.println("\nMotor 1 completado");
       }
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion1 > TIMEOUT_ENCODER) {
@@ -157,7 +157,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       if (abs(motor2.getPosicion() - pos2Inicial) >= pulsos2) {
         motor2.mover(0);
         motor2Completado = true;
-        Serial.println("✓ Motor 2 completado");
+        Serial.println("Motor 2 completado");
       }
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion2 > TIMEOUT_ENCODER) {
@@ -173,7 +173,7 @@ bool moverMotoresSimultaneos(float grados1, float grados2, float grados3) {
       if (abs(motor3.getPosicion() - pos3Inicial) >= pulsos3) {
         motor3.mover(0);
         motor3Completado = true;
-        Serial.println("✓ Motor 3 completado");
+        Serial.println("Motor 3 completado");
       }
       // Verificar timeout del encoder
       else if (millis() - ultimaActualizacion3 > TIMEOUT_ENCODER) {
@@ -343,7 +343,7 @@ bool girarGradosConDeteccion(Motor &motor, float grados, unsigned long &ultimaAc
   motor.mover(0);
   
   long pulsosReales = abs(motor.getPosicion() - posicionInicial);
-  Serial.print("\n\n✓ ");
+  Serial.print("\n\n");
   Serial.print(nombreMotor);
   Serial.print(" completado");
   Serial.print("\n  Objetivo: ");
@@ -403,6 +403,8 @@ void setup() {
   Serial.println("• Cinemática inversa:");
   Serial.println("    CI [azimuth] [elevacion] → Calcular sin mover");
   Serial.println("    CIM [azimuth] [elevacion] → Calcular y mover");
+  Serial.println("    POSCI        → Ver posición actual (azimuth/elevación)");
+  Serial.println("    RESETCI      → Resetear posición a neutra (0°, 0°)");
   Serial.println("");
   Serial.println("• Seguridad:");
   Serial.println("    STOP o S     → Parada de emergencia");
@@ -449,7 +451,7 @@ void loop() {
         motor1.mover(0);
         motor2.mover(0);
         motor3.mover(0);
-        Serial.println("\n PARADA DE EMERGENCIA ACTIVADA 🛑🛑🛑");
+        Serial.println("\n PARADA DE EMERGENCIA ACTIVADA");
         Serial.println("Todos los motores detenidos.");
         Serial.println("Posiciones actuales:");
         Serial.print("  Motor 1: ");
@@ -466,7 +468,7 @@ void loop() {
         motor1.resetPosicion();
         motor2.resetPosicion();
         motor3.resetPosicion();
-        Serial.println("\n✓ Todos los encoders reseteados a 0");
+        Serial.println("\nTodos los encoders reseteados a 0");
         Serial.println("  Motor 1: 0 pulsos");
         Serial.println("  Motor 2: 0 pulsos");
         Serial.println("  Motor 3: 0 pulsos\n");
@@ -474,15 +476,65 @@ void loop() {
       // Comandos R1, R2, R3 - Reset individual
       else if (comando.equals("R1")) {
         motor1.resetPosicion();
-        Serial.println("\n✓ Motor 1 reseteado a 0 pulsos\n");
+        Serial.println("\nMotor 1 reseteado a 0 pulsos\n");
       }
       else if (comando.equals("R2")) {
         motor2.resetPosicion();
-        Serial.println("\n✓ Motor 2 reseteado a 0 pulsos\n");
+        Serial.println("\nMotor 2 reseteado a 0 pulsos\n");
       }
       else if (comando.equals("R3")) {
         motor3.resetPosicion();
-        Serial.println("\n✓ Motor 3 reseteado a 0 pulsos\n");
+        Serial.println("\nMotor 3 reseteado a 0 pulsos\n");
+      }
+      // Comando POSCI - Ver posición actual de cinemática
+      else if (comando.equals("POSCI")) {
+        float azimuth, elevacion;
+        cinematica.obtenerPosicionActual(azimuth, elevacion);
+        
+        float L1, L2, L3;
+        cinematica.obtenerLongitudesActuales(L1, L2, L3);
+        
+        float Li1, Li2, Li3;
+        cinematica.obtenerLongitudesIniciales(Li1, Li2, Li3);
+        
+        Serial.println("\n========== POSICIÓN ACTUAL SISTEMA ==========");
+        Serial.print("Azimuth:   ");
+        Serial.print(azimuth, 2);
+        Serial.println("°");
+        Serial.print("Elevación: ");
+        Serial.print(elevacion, 2);
+        Serial.println("°");
+        
+        Serial.println("\n--- Longitudes de cables ---");
+        Serial.print("Cable 1: ");
+        Serial.print(L1, 2);
+        Serial.print(" mm  (Inicial: ");
+        Serial.print(Li1, 2);
+        Serial.print(" mm, Delta: ");
+        Serial.print(L1 - Li1, 2);
+        Serial.println(" mm)");
+        
+        Serial.print("Cable 2: ");
+        Serial.print(L2, 2);
+        Serial.print(" mm  (Inicial: ");
+        Serial.print(Li2, 2);
+        Serial.print(" mm, Delta: ");
+        Serial.print(L2 - Li2, 2);
+        Serial.println(" mm)");
+        
+        Serial.print("Cable 3: ");
+        Serial.print(L3, 2);
+        Serial.print(" mm  (Inicial: ");
+        Serial.print(Li3, 2);
+        Serial.print(" mm, Delta: ");
+        Serial.print(L3 - Li3, 2);
+        Serial.println(" mm)");
+        
+        Serial.println("============================================\n");
+      }
+      // Comando RESETCI - Resetear posición de cinemática
+      else if (comando.equals("RESETCI")) {
+        cinematica.resetearPosicion();
       }
       // Comando para ver todas las posiciones
       else if (comando.equals("POS")) {
@@ -649,8 +701,8 @@ void loop() {
           
           // Validar rangos
           if (azimuth >= 0 && azimuth <= 360 && elevacion >= 0 && elevacion <= 90) {
-            // Calcular cinemática inversa con salida detallada
-            ResultadoMovimiento resultado = cinematica.calcularMovimiento(azimuth, elevacion, true);
+            // Calcular cinemática inversa INCREMENTAL con salida detallada
+            ResultadoMovimiento resultado = cinematica.calcularMovimientoIncremental(azimuth, elevacion, true);
             
             // Calcular pulsos necesarios
             long pulsos1 = motor1.gradosAPulsos(resultado.motor1);
@@ -668,14 +720,14 @@ void loop() {
             Serial.print(pulsos3);
             Serial.println(" pulsos");
             Serial.println("=========================================");
-            Serial.println("\n Usa CIM para calcular Y mover\n");
+            Serial.println("\nUsa CIM para calcular Y mover\n");
           } else {
-            Serial.println(" Error: Valores fuera de rango");
+            Serial.println("Error: Valores fuera de rango");
             Serial.println("   Azimuth: 0-360°");
             Serial.println("   Elevación: 0-90°\n");
           }
         } else {
-          Serial.println(" Error: Debes especificar azimuth y elevación");
+          Serial.println("Error: Debes especificar azimuth y elevación");
           Serial.println("   Formato: CI [azimuth] [elevacion]");
           Serial.println("   Ejemplo: CI 180 45\n");
         }
@@ -697,39 +749,43 @@ void loop() {
           
           // Validar rangos
           if (azimuth >= 0 && azimuth <= 360 && elevacion >= 0 && elevacion <= 90) {
-            // Calcular cinemática inversa con salida detallada
-            ResultadoMovimiento resultado = cinematica.calcularMovimiento(azimuth, elevacion, true);
+            // Calcular cinemática inversa INCREMENTAL con salida detallada
+            ResultadoMovimiento resultado = cinematica.calcularMovimientoIncremental(azimuth, elevacion, true);
             
-            Serial.println("\n Iniciando movimiento basado en cinemática inversa...\n");
+            Serial.println("\nIniciando movimiento basado en cinemática inversa...\n");
             
-            // Ejecutar movimiento simultáneo de los 3 motores
+            // Ejecutar movimiento simultáneo de los 3 motores (movimiento incremental)
             bool exito = moverMotoresSimultaneos(resultado.motor1, resultado.motor2, resultado.motor3);
             
             if (exito) {
-              Serial.println(" Sistema posicionado correctamente");
+              // ACTUALIZAR la posición actual del sistema
+              cinematica.actualizarPosicionActual(azimuth, elevacion);
+              
+              Serial.println("Sistema posicionado correctamente");
               Serial.print("   Azimuth objetivo: ");
               Serial.print(azimuth, 1);
               Serial.println("°");
-              Serial.print("  Elevación objetivo: ");
+              Serial.print("   Elevación objetivo: ");
               Serial.print(elevacion, 1);
               Serial.println("°\n");
             } else {
-              Serial.println(" Movimiento terminado con errores\n");
+              Serial.println("Movimiento terminado con errores");
+              Serial.println("   Posición actual NO actualizada\n");
             }
           } else {
-            Serial.println(" Error: Valores fuera de rango");
+            Serial.println("Error: Valores fuera de rango");
             Serial.println("   Azimuth: 0-360°");
             Serial.println("   Elevación: 0-90°\n");
           }
         } else {
-          Serial.println(" Error: Debes especificar azimuth y elevación");
+          Serial.println("Error: Debes especificar azimuth y elevación");
           Serial.println("   Formato: CIM [azimuth] [elevacion]");
           Serial.println("   Ejemplo: CIM 180 45\n");
         }
       }
       // Comando no reconocido
       else {
-        Serial.println("\n Comando no reconocido\n");
+        Serial.println("\nComando no reconocido\n");
         Serial.println("COMANDOS DISPONIBLES:");
         Serial.println("  M1 [grados]       → Mover Motor 1");
         Serial.println("  M2 [grados]       → Mover Motor 2");
@@ -737,6 +793,8 @@ void loop() {
         Serial.println("  ALL [g1] [g2] [g3] → Mover los 3 simultáneamente");
         Serial.println("  CI [az] [el]      → Calcular cinemática inversa");
         Serial.println("  CIM [az] [el]     → Calcular y mover");
+        Serial.println("  POSCI             → Ver posición actual sistema");
+        Serial.println("  RESETCI           → Resetear posición a neutra");
         Serial.println("  STOP o S          → Parada de emergencia");
         Serial.println("  R                 → Reset todos los encoders");
         Serial.println("  R1/R2/R3          → Reset encoder individual");
@@ -748,6 +806,7 @@ void loop() {
         Serial.println("  ALL 90 180 -90 → M1=90°, M2=180°, M3=-90°");
         Serial.println("  CI 180 45      → Calcular para azimuth=180°, elev=45°");
         Serial.println("  CIM 180 45     → Calcular y mover a esa posición");
+        Serial.println("  POSCI          → Ver posición actual del sistema");
         Serial.println("  S              → Parar todo\n");
       }
       

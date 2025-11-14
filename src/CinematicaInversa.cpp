@@ -23,9 +23,8 @@ CinematicaInversa::CinematicaInversa() {
     // ========== PARÁMETROS DE CONVERSIÓN ==========
     // Radio de la polea (mm)
     RADIO_POLEA = 8.75;
+    km = (2*PI*RADIO_POLEA)/25200;  // Circunferencia de la polea
     
-    // Factor de reducción mecánica
-    FACTOR_REDUCCION = 0.063;
     
     // Conversión: ΔL (mm) a grados de rotación del motor
     // MM_A_GRADOS = (180 / (π × radio)) × factor_reducción
@@ -35,6 +34,10 @@ CinematicaInversa::CinematicaInversa() {
     Li1 = calcularLongitudCable(Base1, Plat1, 0, 0);
     Li2 = calcularLongitudCable(Base2, Plat2, 0, 0);
     Li3 = calcularLongitudCable(Base3, Plat3, 0, 0);
+    
+    // Inicializar posición actual en neutro
+    azimuthActual = 0.0;
+    elevacionActual = 0.0;
     
     imprimirInfo();
 }
@@ -58,17 +61,6 @@ float CinematicaInversa::deltaLAGrados(float deltaL_mm) {
     return deltaL_mm * MM_A_GRADOS;
 }
 
-void CinematicaInversa::azimuthElevacionATxTy(float azimuth_deg, float elevacion_deg,
-                                              float& tx_grados, float& ty_grados) {
-    // Para seguimiento solar simple:
-    // tx corresponde a la elevación
-    // ty corresponde al azimuth (puede necesitar offset/transformación)
-    
-    // IMPORTANTE: Ajusta estos cálculos según tu configuración física
-    // Esta es una aproximación simple
-    tx_grados = elevacion_deg;
-    ty_grados = azimuth_deg - 180.0;  // Centrar en 0° cuando el sol está al sur
-}
 
 ResultadoMovimiento CinematicaInversa::calcularMovimiento(float azimuth_deg, 
                                                          float elevacion_deg,
@@ -220,4 +212,122 @@ void CinematicaInversa::imprimirInfo() const {
     Serial.print(Li3, 2);
     Serial.println(F(" mm"));
     Serial.println(F("==========================================\n"));
+}
+
+ResultadoMovimiento CinematicaInversa::calcularMovimientoIncremental(float azimuth_objetivo,
+                                                                     float elevacion_objetivo,
+                                                                     bool verbose) {
+    if (verbose) {
+        Serial.println();
+        Serial.println(F("=================================================="));
+        Serial.println(F("CALCULO DE CINEMATICA INVERSA INCREMENTAL"));
+        Serial.println(F("=================================================="));
+        Serial.print(F("Posicion actual:\n"));
+        Serial.print(F("  Azimuth: "));
+        Serial.print(azimuthActual, 2);
+        Serial.println(F("°"));
+        Serial.print(F("  Elevacion: "));
+        Serial.print(elevacionActual, 2);
+        Serial.println(F("°"));
+        
+        Serial.print(F("\nPosicion objetivo:\n"));
+        Serial.print(F("  Azimuth: "));
+        Serial.print(azimuth_objetivo, 2);
+        Serial.println(F("°"));
+        Serial.print(F("  Elevacion: "));
+        Serial.print(elevacion_objetivo, 2);
+        Serial.println(F("°"));
+    }
+    
+    // Calcular movimiento desde posición actual (sin verbose para cálculo interno)
+    ResultadoMovimiento movActual = calcularMovimiento(azimuthActual, elevacionActual, false);
+    
+    // Calcular movimiento hacia posición objetivo (sin verbose para cálculo interno)
+    ResultadoMovimiento movObjetivo = calcularMovimiento(azimuth_objetivo, elevacion_objetivo, false);
+    
+    // Calcular movimiento incremental (diferencia)
+    ResultadoMovimiento movIncremental;
+    movIncremental.motor1 = movObjetivo.motor1 - movActual.motor1;
+    movIncremental.motor2 = movObjetivo.motor2 - movActual.motor2;
+    movIncremental.motor3 = movObjetivo.motor3 - movActual.motor3;
+    movIncremental.deltaL1 = movObjetivo.deltaL1 - movActual.deltaL1;
+    movIncremental.deltaL2 = movObjetivo.deltaL2 - movActual.deltaL2;
+    movIncremental.deltaL3 = movObjetivo.deltaL3 - movActual.deltaL3;
+    
+    if (verbose) {
+        Serial.println(F("\n=================================================="));
+        Serial.println(F("RESULTADO: MOVIMIENTO INCREMENTAL"));
+        Serial.println(F("=================================================="));
+        Serial.print(F("  Motor 1: "));
+        Serial.print(movIncremental.motor1, 2);
+        Serial.print(F("° (de "));
+        Serial.print(movActual.motor1, 2);
+        Serial.print(F("° a "));
+        Serial.print(movObjetivo.motor1, 2);
+        Serial.println(F("°)"));
+        
+        Serial.print(F("  Motor 2: "));
+        Serial.print(movIncremental.motor2, 2);
+        Serial.print(F("° (de "));
+        Serial.print(movActual.motor2, 2);
+        Serial.print(F("° a "));
+        Serial.print(movObjetivo.motor2, 2);
+        Serial.println(F("°)"));
+        
+        Serial.print(F("  Motor 3: "));
+        Serial.print(movIncremental.motor3, 2);
+        Serial.print(F("° (de "));
+        Serial.print(movActual.motor3, 2);
+        Serial.print(F("° a "));
+        Serial.print(movObjetivo.motor3, 2);
+        Serial.println(F("°)"));
+        
+        Serial.println(F("=================================================="));
+        Serial.println(F("\nConvencion:"));
+        Serial.println(F("  Positivo (+) = Suelta cable (longitud aumenta)"));
+        Serial.println(F("  Negativo (-) = Jala cable (longitud disminuye)"));
+        Serial.println(F("==================================================\n"));
+    }
+    
+    return movIncremental;
+}
+
+void CinematicaInversa::actualizarPosicionActual(float azimuth_deg, float elevacion_deg) {
+    azimuthActual = azimuth_deg;
+    elevacionActual = elevacion_deg;
+    
+    Serial.println(F("\nPosicion actual actualizada:"));
+    Serial.print(F("  Azimuth: "));
+    Serial.print(azimuthActual, 2);
+    Serial.println(F("°"));
+    Serial.print(F("  Elevacion: "));
+    Serial.print(elevacionActual, 2);
+    Serial.println(F("°\n"));
+}
+
+void CinematicaInversa::obtenerPosicionActual(float& azimuth_deg, float& elevacion_deg) const {
+    azimuth_deg = azimuthActual;
+    elevacion_deg = elevacionActual;
+}
+
+void CinematicaInversa::obtenerLongitudesActuales(float& L1, float& L2, float& L3) {
+    // Convertir posición actual a ángulos de plataforma
+    float tx_grados, ty_grados;
+    azimuthElevacionATxTy(azimuthActual, elevacionActual, tx_grados, ty_grados);
+    
+    // Convertir a radianes
+    float tx_rad = tx_grados * DEG_TO_RAD;
+    float ty_rad = ty_grados * DEG_TO_RAD;
+    
+    // Calcular longitudes actuales
+    L1 = calcularLongitudCable(Base1, Plat1, tx_rad, ty_rad);
+    L2 = calcularLongitudCable(Base2, Plat2, tx_rad, ty_rad);
+    L3 = calcularLongitudCable(Base3, Plat3, tx_rad, ty_rad);
+}
+
+void CinematicaInversa::resetearPosicion() {
+    azimuthActual = 0.0;
+    elevacionActual = 0.0;
+    
+    Serial.println(F("\nPosicion reseteada a neutra (0°, 0°)\n"));
 }
