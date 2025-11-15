@@ -61,6 +61,20 @@ float CinematicaInversa::deltaLAGrados(float deltaL_mm) {
     return deltaL_mm * MM_A_GRADOS;
 }
 
+void CinematicaInversa::azimuthElevacionATxTy(float azimuth_deg, float elevacion_deg,
+                                              float& tx_grados, float& ty_grados) {
+    // Convertir azimuth y elevación solar a ángulos de rotación de la plataforma
+    // TX corresponde a la rotación alrededor del eje X (pitch)
+    // TY corresponde a la rotación alrededor del eje Y (roll)
+    
+    // Elevación solar se mapea directamente a TX (inclinación)
+    tx_grados = elevacion_deg;
+    
+    // Azimuth solar se mapea a TY (rotación horizontal)
+    // Normalmente: TY = azimuth - 180 (para ajustar referencia)
+    // Ajustar según la orientación de tu sistema
+    ty_grados = azimuth_deg - 180.0;
+}
 
 ResultadoMovimiento CinematicaInversa::calcularMovimiento(float azimuth_deg, 
                                                          float elevacion_deg,
